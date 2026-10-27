@@ -1,0 +1,7 @@
+*.exe
+*.exe.config
+.vs/
+bin/
+obj/
+Thumbs.db
+desktop.ini
