@@ -19,7 +19,7 @@ namespace Xuca
     {
         public MonitorRed()
         {
-            Clave = "red"; NombreEs = "Monitor de red"; NombreEn = "Network Monitor";
+            Clave = "red"; PestEs = "Red"; PestEn = "Network"; TipEs = "Red"; TipEn = "Net"; NombreEs = "Monitor de red"; NombreEn = "Network Monitor";
             RegistroArch = "registro_red.txt"; HistArch = "historial_red.txt";
             ContEs = "Cortes y lag"; ContEn = "Drops and lag";
             VacioEs = "Todo bien por ahora. Si se corta internet o sube el ping, acá vas a ver qué pasó.";

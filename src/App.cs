@@ -15,12 +15,19 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
+[assembly: AssemblyTitle("Xuca Monitor")]
+[assembly: AssemblyProduct("Xuca Monitor")]
+[assembly: AssemblyCompany("011Xuca")]
+[assembly: AssemblyCopyright("011Xuca")]
+[assembly: AssemblyVersion(Xuca.XucaMonitor.Version + ".0")]
+[assembly: AssemblyFileVersion(Xuca.XucaMonitor.Version + ".0")]
+
 namespace Xuca
 {
     // ---------- Lo que comparten Red y USB ----------
     public abstract class Modulo
     {
-        public string Clave, NombreEs, NombreEn, RegistroArch, HistArch, ContEs, ContEn, VacioEs, VacioEn, ApagadoEs, ApagadoEn;
+        public string Clave, PestEs, PestEn, TipEs, TipEn, NombreEs, NombreEn, RegistroArch, HistArch, ContEs, ContEn, VacioEs, VacioEn, ApagadoEs, ApagadoEn;
         public XucaMonitor App;
         public bool Activo;
         public DateTime Desde = DateTime.Now;
@@ -137,9 +144,11 @@ namespace Xuca
     }
 
     // ---------- La app ----------
-    public class XucaMonitor : ApplicationContext
+    public partial class XucaMonitor : ApplicationContext
     {
         public const string Nombre = "Xuca Monitor";
+        // Al sacar una version nueva: cambiar esto y subir el .exe a un Release de GitHub con el tag "v" + Version
+        public const string Version = "1.0.1";
 
         string Dir, Datos, CfgF, Exe, InicioLnk;
         readonly List<Modulo> modulos = new List<Modulo>();
@@ -171,11 +180,16 @@ namespace Xuca
         static string T(string es, string en) { return Modulo.T(es, en); }
 
         // Devuelve false si ya habia otro abierto (a ese se le pide que muestre su ventana)
-        public bool Iniciar(bool oculto)
+        public bool Iniciar(bool oculto, bool actualizado)
         {
             bool creado;
             mutex = new Mutex(true, "Local\\XucaMonitor", out creado);
             evMostrar = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\XucaMonitor_Mostrar");
+            // Recien actualizada: la version vieja todavia se esta cerrando, se espera a que suelte el mutex
+            if (!creado && actualizado)
+            {
+                try { creado = mutex.WaitOne(8000); } catch (AbandonedMutexException) { creado = true; }
+            }
             if (!creado) { evMostrar.Set(); return false; }
 
             Exe = Application.ExecutablePath;
@@ -201,6 +215,8 @@ namespace Xuca
             if (aj.TryGetValue("idioma", out v) && (v == "es" || v == "en")) Modulo.Idioma = v;
             else Modulo.Idioma = Thread.CurrentThread.CurrentUICulture.TwoLetterISOLanguageName == "es" ? "es" : "en";
             if (aj.TryGetValue("tema", out v) && (v == "sistema" || v == "claro" || v == "oscuro")) tema = v;
+            float z;
+            if (aj.TryGetValue("zoom", out v) && float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out z)) zoom = Math.Max(7f, Math.Min(24f, z));
 
             Ui = new Control();
             IntPtr h = Ui.Handle; // crea la ventana oculta en este hilo
@@ -221,6 +237,8 @@ namespace Xuca
 
             modulos.Add(new MonitorRed());
             modulos.Add(new MonitorUsb());
+            modulos.Add(new MonitorRend());
+            modulos.Add(new MonitorErrores());
             foreach (Modulo m in modulos)
             {
                 m.App = this;
@@ -245,6 +263,9 @@ namespace Xuca
                 menu.Items.Add(it);
             }
             menu.Items.Add(new ToolStripSeparator());
+            miAct = new ToolStripMenuItem("", null, delegate { Actualizar(); });
+            miAct.Visible = false;
+            menu.Items.Add(miAct);
             miSalir = new ToolStripMenuItem("", null, delegate { Salir(); });
             menu.Items.Add(miSalir);
             ni.ContextMenuStrip = menu;
@@ -275,6 +296,7 @@ namespace Xuca
                 if (prender) m.Prender(true);
             }
             ActualizarTextos();
+            EmpezarBusquedaAct();
             if (!oculto) MostrarVentana(); else Recortar();
             return true;
         }
@@ -295,7 +317,9 @@ namespace Xuca
             ni.Visible = false;
             ni.Dispose();
             if (fv != null) { fv.Dispose(); fv = null; }
+            if (timerAct != null) timerAct.Dispose();
             try { mutex.ReleaseMutex(); } catch { }
+            try { mutex.Close(); } catch { }
             ExitThread();
         }
 
@@ -320,28 +344,43 @@ namespace Xuca
         }
 
         // ---------- Ajustes ----------
+        readonly object cerrojoAj = new object();
+
+        public string Ajuste(string k)
+        {
+            string v;
+            return LeerAjustes().TryGetValue(k, out v) ? v : null;
+        }
+
         Dictionary<string, string> LeerAjustes()
         {
             Dictionary<string, string> c = new Dictionary<string, string>();
-            try
+            lock (cerrojoAj)
             {
-                foreach (string l in File.ReadAllLines(CfgF))
+                try
                 {
-                    int i = l.IndexOf('=');
-                    if (i > 0) c[l.Substring(0, i).Trim()] = l.Substring(i + 1).Trim();
+                    foreach (string l in File.ReadAllLines(CfgF))
+                    {
+                        int i = l.IndexOf('=');
+                        if (i > 0) c[l.Substring(0, i).Trim()] = l.Substring(i + 1).Trim();
+                    }
                 }
+                catch { }
             }
-            catch { }
             return c;
         }
 
-        void GuardarAjuste(string k, string v)
+        // Se puede llamar desde cualquier hilo
+        public void GuardarAjuste(string k, string v)
         {
-            Dictionary<string, string> c = LeerAjustes();
-            c[k] = v;
-            List<string> l = new List<string>();
-            foreach (KeyValuePair<string, string> p in c) l.Add(p.Key + "=" + p.Value);
-            try { File.WriteAllLines(CfgF, l.ToArray()); } catch { }
+            lock (cerrojoAj)
+            {
+                Dictionary<string, string> c = LeerAjustes();
+                c[k] = v;
+                List<string> l = new List<string>();
+                foreach (KeyValuePair<string, string> p in c) l.Add(p.Key + "=" + p.Value);
+                try { File.WriteAllLines(CfgF, l.ToArray()); } catch { }
+            }
         }
 
         void LlenarTexto()
@@ -441,12 +480,13 @@ namespace Xuca
         // ---------- Textos (para cambiar de idioma sin cerrar) ----------
         void ActualizarTextos()
         {
+            TextoActualizar();
             miAbrir.Text = T("Abrir", "Open");
             miSalir.Text = T("Salir", "Exit");
             foreach (Modulo m in modulos) { miMod[m].Text = m.Nombre; miMod[m].Checked = m.Activo; }
             if (fv != null)
             {
-                fv.Text = Nombre;
+                fv.Text = Nombre + " v" + Version;
                 chkInicio.Text = T("Iniciar con Windows", "Start with Windows");
                 bEsc.Text = T("Acceso directo en el escritorio", "Desktop shortcut");
                 bTema.Text = TextoTema();
@@ -468,7 +508,7 @@ namespace Xuca
                 foreach (KeyValuePair<Modulo, Button> p in pestanas)
                 {
                     Modulo m = p.Key;
-                    p.Value.Text = (m.Clave == "red" ? T("Red", "Network") : "USB") + "  " + (m.Activo ? "(" + m.Contador() + ")" : T("(apagado)", "(off)"));
+                    p.Value.Text = T(m.PestEs, m.PestEn) + "  " + (m.Activo ? "(" + m.Contador() + ")" : T("(apagado)", "(off)"));
                 }
                 string cont = T(actual.ContEs, actual.ContEn);
                 if (!actual.Activo)
@@ -482,7 +522,7 @@ namespace Xuca
             StringBuilder tip = new StringBuilder(Nombre + " -");
             foreach (Modulo m in modulos)
             {
-                tip.Append(" " + (m.Clave == "red" ? T("Red", "Net") : "USB") + " " + (m.Activo ? m.Contador().ToString() : "off"));
+                tip.Append(" " + T(m.TipEs, m.TipEn) + " " + (m.Activo ? m.Contador().ToString() : "off"));
                 if (m != modulos[modulos.Count - 1]) tip.Append(" ·");
             }
             string t = tip.ToString();
@@ -617,7 +657,8 @@ namespace Xuca
             tb.ScrollBars = ScrollBars.Vertical;
             tb.Dock = DockStyle.Fill;
             tb.BorderStyle = BorderStyle.None;
-            tb.Font = new Font("Consolas", 10f);
+            tb.Font = new Font("Consolas", zoom);
+            PrepararZoom();
 
             medio = new Panel();
             medio.Dock = DockStyle.Fill;
@@ -638,8 +679,11 @@ namespace Xuca
             fv.Controls.Add(estado);
             fv.Controls.Add(fila2);
             fv.Controls.Add(arriba);
+            CrearCartelAct();
 
             // Minimizar o cerrar con la X la manda a la bandeja: la ventana se destruye y se libera la memoria
+            fv.KeyPreview = true;
+            fv.KeyDown += TeclaZoom;
             fv.Resize += delegate { if (fv != null && fv.WindowState == FormWindowState.Minimized) CerrarVentana(); };
             fv.FormClosing += delegate (object s, FormClosingEventArgs e)
             {
@@ -684,11 +728,16 @@ namespace Xuca
         static void Main(string[] args)
         {
             bool oculto = false;
-            foreach (string a in args) if (a.Equals("/inicio", StringComparison.OrdinalIgnoreCase)) oculto = true;
+            bool actualizado = false;
+            foreach (string a in args)
+            {
+                if (a.Equals("/inicio", StringComparison.OrdinalIgnoreCase)) oculto = true;
+                if (a.Equals("/actualizado", StringComparison.OrdinalIgnoreCase)) actualizado = true;
+            }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             XucaMonitor app = new XucaMonitor();
-            if (app.Iniciar(oculto)) Application.Run(app);
+            if (app.Iniciar(oculto, actualizado)) Application.Run(app);
         }
     }
 }

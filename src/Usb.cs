@@ -15,7 +15,7 @@ namespace Xuca
     {
         public MonitorUsb()
         {
-            Clave = "usb"; NombreEs = "Monitor USB"; NombreEn = "USB Monitor";
+            Clave = "usb"; PestEs = PestEn = TipEs = TipEn = "USB"; NombreEs = "Monitor USB"; NombreEn = "USB Monitor";
             RegistroArch = "registro_usb.txt"; HistArch = "historial_usb.txt";
             ContEs = "Desconexiones"; ContEn = "Disconnections";
             VacioEs = "Todavía no se desconectó nada. Cuando suene el ruido, acá vas a ver qué fue.";
