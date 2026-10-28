@@ -2,6 +2,12 @@
 
 Todo lo que cambió en cada versión de **Xuca Monitor**. La más nueva va arriba.
 
+## v1.0.2
+
+### Nuevo
+- **Rendimiento** ahora avisa cuando **otro programa le saca el foco al juego** sin que toques nada (Discord, Steam, un aviso de Windows Update, un pedido de permiso...): qué programa fue, qué ventana abrió y cuánto tiempo quedó el juego atrás, con qué probar para que no pase más. Si eso pasó justo antes de un bajón de FPS, el aviso del bajón también lo dice.
+- No cuenta lo que hacés vos (Alt+Tab, la tecla Windows, el menú inicio o un clic en otra ventana).
+
 ## v1.0.1
 
 ### Nuevo

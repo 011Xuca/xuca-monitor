@@ -148,7 +148,7 @@ namespace Xuca
     {
         public const string Nombre = "Xuca Monitor";
         // Al sacar una version nueva: cambiar esto y subir el .exe a un Release de GitHub con el tag "v" + Version
-        public const string Version = "1.0.1";
+        public const string Version = "1.0.2";
 
         string Dir, Datos, CfgF, Exe, InicioLnk;
         readonly List<Modulo> modulos = new List<Modulo>();

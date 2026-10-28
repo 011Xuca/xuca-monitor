@@ -2,6 +2,8 @@
 // placa de video, y cuando algo se dispara te dice el culpable (programa de fondo, temperatura, RAM llena, disco al 100 %).
 // No mide FPS (eso pide permisos de administrador): detecta lo que suele causar los bajones.
 // Fuera de los juegos solo mira cada 2 s que ventana esta adelante, y no gasta casi nada.
+// Tambien avisa cuando otro programa le saca el foco al juego sin que toques nada (Discord, Steam, un aviso de Windows...):
+// Windows le avisa a la app cada vez que cambia la ventana de adelante (SetWinEventHook), asi que no hay que estar mirando.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -38,12 +40,17 @@ namespace Xuca
             hilo.IsBackground = true;
             hilo.Priority = ThreadPriority.BelowNormal;
             hilo.Start();
+            hiloFoco = new Thread(VueltaFoco);
+            hiloFoco.IsBackground = true;
+            hiloFoco.Start();
         }
 
         protected override void Terminar()
         {
             parar = true;
             despertar.Set();
+            if (tidFoco != 0) PostThreadMessage(tidFoco, 0x12, IntPtr.Zero, IntPtr.Zero); // WM_QUIT
+            if (hiloFoco != null) hiloFoco.Join(2000);
             if (hilo != null) hilo.Join(3000);
         }
 
@@ -63,7 +70,7 @@ namespace Xuca
         static readonly Regex NoJuego = new Regex("^(explorer|chrome|msedge|firefox|opera|opera_gx|brave|vivaldi|vlc|mpc-hc64|mpc-hc|mpc-be64|potplayer|potplayermini64|wmplayer|applicationframehost|lockapp|searchhost|startmenuexperiencehost|shellexperiencehost|textinputhost|powerpnt|xucamonitor|obs64|discord|spotify|steamwebhelper)$", RegexOptions.IgnoreCase);
 
         static readonly int miPid = Process.GetCurrentProcess().Id;
-        int pidJuego;
+        volatile int pidJuego;
         string nomJuego = "";
 
         // Devuelve el pid del juego en pantalla completa que esta adelante (0 si no hay)
@@ -88,6 +95,135 @@ namespace Xuca
             try { using (Process p = Process.GetProcessById(pid)) nombre = p.ProcessName; } catch { return 0; }
             if (NoJuego.IsMatch(nombre)) return 0;
             return pid;
+        }
+
+        // ---------- Otro programa le saca el foco al juego ----------
+        delegate void WinEventProc(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint hilo, uint ms);
+        [DllImport("user32.dll")] static extern IntPtr SetWinEventHook(uint min, uint max, IntPtr mod, WinEventProc cb, uint pid, uint tid, uint flags);
+        [DllImport("user32.dll")] static extern bool UnhookWinEvent(IntPtr h);
+        [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr h; public uint msg; public IntPtr w, l; public uint time; public int x, y; }
+        [DllImport("user32.dll")] static extern int GetMessage(out MSG m, IntPtr h, uint min, uint max);
+        [DllImport("user32.dll")] static extern bool PostThreadMessage(uint tid, uint msg, IntPtr w, IntPtr l);
+        [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+
+        Thread hiloFoco;
+        volatile uint tidFoco;
+        WinEventProc alCambiar; // guardado para que no lo borre el recolector
+        readonly object cerrojoFoco = new object();
+        int ultimoAdelante;
+        class Robo { public DateTime Desde; public string Proc = "", Titulo = ""; }
+        Robo robo;
+        DateTime roboFin; string roboQuien = "";
+        readonly Dictionary<string, DateTime> roboAvisado = new Dictionary<string, DateTime>();
+
+        // Ventanas que abris vos: el Alt+Tab, el menu inicio, la busqueda, el administrador de tareas
+        static readonly Regex DeVos = new Regex("^(startmenuexperiencehost|searchhost|searchapp|searchui|shellexperiencehost|taskmgr|xucamonitor)$", RegexOptions.IgnoreCase);
+        static readonly Regex ClaseSwitch = new Regex("^(MultitaskingViewFrame|XamlExplorerHostIslandWindow|ForegroundStaging|TaskSwitcherWnd|Shell_TrayWnd|NotifyIconOverflowWindow|TopLevelWindowForOverflowXamlIsland)$");
+
+        void VueltaFoco()
+        {
+            tidFoco = GetCurrentThreadId();
+            alCambiar = AlCambiar;
+            IntPtr hook = SetWinEventHook(3, 3, IntPtr.Zero, alCambiar, 0, 0, 0); // EVENT_SYSTEM_FOREGROUND, fuera de proceso
+            if (hook == IntPtr.Zero) return;
+            try { MSG m; while (!parar && GetMessage(out m, IntPtr.Zero, 0, 0) > 0) { } }
+            finally { UnhookWinEvent(hook); tidFoco = 0; }
+        }
+
+        static bool Apretada(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+
+        void AlCambiar(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint hiloV, uint ms)
+        {
+            try
+            {
+                int juego = pidJuego;
+                int pid = 0;
+                if (hwnd != IntPtr.Zero) GetWindowThreadProcessId(hwnd, out pid);
+                int antes = ultimoAdelante;
+                ultimoAdelante = pid;
+                if (juego == 0 || pid == 0) return;
+                if (pid == juego)
+                {
+                    // Volvio el juego: si se lo habian sacado, se avisa con cuanto duro
+                    Robo r;
+                    lock (cerrojoFoco) { r = robo; robo = null; }
+                    if (r != null) AvisoFoco(r, DateTime.Now - r.Desde, false);
+                    return;
+                }
+                if (antes != juego) return;
+                lock (cerrojoFoco) { if (robo != null) return; }
+                // Lo hiciste vos: Alt, Windows, Ctrl o un clic en el momento del cambio, o una ventana del sistema que abris vos
+                if (Apretada(0x12) || Apretada(0x5B) || Apretada(0x5C) || Apretada(0x11) || Apretada(0x01) || Apretada(0x02)) return;
+                StringBuilder cls = new StringBuilder(64);
+                GetClassName(hwnd, cls, 64);
+                if (ClaseSwitch.IsMatch(cls.ToString())) return;
+                string nom = "";
+                try { using (Process p = Process.GetProcessById(pid)) nom = p.ProcessName; } catch { }
+                if (nom == "" || DeVos.IsMatch(nom)) return;
+                StringBuilder tit = new StringBuilder(120);
+                GetWindowText(hwnd, tit, 120);
+                Robo n = new Robo(); n.Desde = DateTime.Now; n.Proc = nom; n.Titulo = tit.ToString().Trim();
+                lock (cerrojoFoco) { robo = n; }
+            }
+            catch { }
+        }
+
+        // Lo llama la vuelta principal: si el juego sigue atras despues de 20 s, se avisa igual
+        void RevisarFoco()
+        {
+            Robo r = null;
+            lock (cerrojoFoco)
+            {
+                if (robo != null && (DateTime.Now - robo.Desde).TotalSeconds > 20) { r = robo; robo = null; }
+            }
+            if (r != null) AvisoFoco(r, DateTime.Now - r.Desde, true);
+        }
+
+        static string PistaFoco(string n)
+        {
+            string x = n.ToLowerInvariant();
+            if (x == "discord" || x == "update") return T("Discord se puso adelante (suele pasar cuando se actualiza o con una llamada). Abrilo y dejalo actualizar antes de jugar.", "Discord came to the front (it usually happens when it updates or on a call). Open it and let it update before you play.");
+            if (Regex.IsMatch(x, "^(steam|steamwebhelper)$")) return T("Steam abrió una ventana (amigos, una oferta o una actualización). En Steam > Configuración > Interfaz apagá que se abra al iniciar y las ofertas.", "Steam opened a window (friends, a sale or an update). In Steam > Settings > Interface, turn off opening at startup and sale popups.");
+            if (Regex.IsMatch(x, "^(musnotification|musnotifyicon|mousocoreworker|wuauclt|usoclient)$")) return T("Windows Update te mostró un aviso de reinicio. Poné tus horas de juego en Configuración > Windows Update > Horas activas.", "Windows Update showed a restart notice. Set your gaming hours in Settings > Windows Update > Active hours.");
+            if (x == "consent") return T("Un pedido de permiso de administrador (UAC): algún programa quiso instalarse o cambiar algo.", "An administrator permission prompt (UAC): some program wanted to install or change something.");
+            if (x == "werfault") return T("Un aviso de error de Windows: algún programa se colgó o se cerró (mirá la pestaña Errores).", "A Windows error notice: some program hung or crashed (check the Errors tab).");
+            if (Regex.IsMatch(x, "^(gamebar|gamebarftserver|xboxgamebarwidgets|gamebarpresencewriter)$")) return T("La Xbox Game Bar se abrió (Win+G o un widget). Si no la usás, apagala en Configuración > Juegos.", "The Xbox Game Bar opened (Win+G or a widget). If you do not use it, turn it off in Settings > Gaming.");
+            if (Regex.IsMatch(x, "^(riotclientux|riotclientservices|epicgameslauncher|battle\\.net|eadesktop|upc|ubisoftconnect|galaxyclient)$")) return T("Un launcher de juegos abrió una ventana (un aviso o una actualización). Desactivá sus notificaciones o cerralo mientras jugás.", "A game launcher opened a window (a notice or an update). Turn off its notifications or close it while you play.");
+            if (Regex.IsMatch(x, "^(nvidia overlay|nvidia app|nvcontainer|radeonsoftware|amdrsserv)$")) return T("El programa de la placa de video (overlay de NVIDIA o AMD) se puso adelante. Revisá sus avisos o apagá el overlay si no lo usás.", "The graphics card software (NVIDIA or AMD overlay) came to the front. Check its notices or turn off the overlay if you do not use it.");
+            if (Regex.IsMatch(x, "^(chrome|msedge|firefox|opera|opera_gx|brave)$")) return T("El navegador abrió una ventana o pestaña solo (una página o una notificación). Cerralo mientras jugás.", "The browser opened a window or tab by itself (a page or a notification). Close it while you play.");
+            if (x == "explorer") return T("El Explorador de Windows abrió una ventana sola (por ejemplo al conectar un USB). Podés apagar la Reproducción automática en Configuración > Bluetooth y dispositivos.", "Windows Explorer opened a window by itself (for example when you plug in a USB). You can turn off AutoPlay in Settings > Bluetooth & devices.");
+            return null;
+        }
+
+        void AvisoFoco(Robo r, TimeSpan dur, bool sigueAtras)
+        {
+            string clave = r.Proc.ToLowerInvariant();
+            DateTime t;
+            lock (cerrojoFoco)
+            {
+                roboFin = DateTime.Now; roboQuien = r.Proc;
+                if (roboAvisado.TryGetValue(clave, out t) && (DateTime.Now - t).TotalMinutes < 2) return;
+                roboAvisado[clave] = DateTime.Now;
+            }
+            string cuanto = dur.TotalSeconds < 1 ? T("menos de 1 s", "less than 1 s") : ((int)Math.Round(dur.TotalSeconds)).ToString() + " s";
+            string quien = r.Proc + ".exe" + (r.Titulo != "" ? " (\"" + r.Titulo + "\")" : "");
+            List<string> L = new List<string>();
+            L.Add(T("EL JUEGO PERDIÓ EL FOCO: ", "THE GAME LOST FOCUS: ") + Fecha(r.Desde) + "   (" + nomJuego + ")");
+            L.Add("");
+            L.Add(T("QUÉ PASÓ:", "WHAT HAPPENED:"));
+            L.Add(T("  " + quien + " se puso adelante sin que toques nada, y el juego quedó atrás " + (sigueAtras ? "más de " + cuanto + " (sigue atrás)." : cuanto + "."),
+                    "  " + quien + " came to the front without you touching anything, and the game was in the background " + (sigueAtras ? "for more than " + cuanto + " (still is)." : "for " + cuanto + ".")));
+            L.Add(T("  Eso da un tirón, te saca del juego o lo minimiza (en pantalla completa exclusiva).", "  That causes a stutter, kicks you out of the game or minimizes it (in exclusive fullscreen)."));
+            L.Add("");
+            L.Add(T("QUÉ PROBAR:", "WHAT TO TRY:"));
+            string pi = PistaFoco(r.Proc);
+            L.Add("  - " + (pi ?? T("Si se repite, fijate si ese programa tiene avisos o ventanas que se abren solas y apagalos, o cerralo mientras jugás.", "If it happens again, check whether that program has popups or notices and turn them off, or close it while you play.")));
+            L.Add(T("  - Jugar en \"Pantalla completa sin bordes\" hace que estos cambios no minimicen el juego.", "  - Playing in \"Borderless fullscreen\" stops these changes from minimizing the game."));
+            foreach (string x in L) Log(x);
+            Log("");
+            Agregar(string.Join("\r\n", L.ToArray()).TrimEnd(), 1);
         }
 
         // ---------- Mediciones (sin WMI: contadores de Windows y llamadas directas) ----------
@@ -319,6 +455,7 @@ namespace Xuca
             if (pidJuego == 0) return;
             if (pid == 0)
             {
+                RevisarFoco();
                 // Si el juego queda atras mas de 60 s (o se cerro), se deja de medir
                 if (fueraDesde == DateTime.MinValue) fueraDesde = DateTime.Now;
                 bool vivo = false;
@@ -331,6 +468,7 @@ namespace Xuca
                 return;
             }
             fueraDesde = DateTime.MinValue;
+            RevisarFoco();
 
             Muestra m = Medir();
             ultimas.Enqueue(m);
@@ -405,6 +543,11 @@ namespace Xuca
                 L.Add(T("  El procesador bajó mucho su velocidad (" + P(m.Perf) + " de su máximo de " + P(perfMax) + ") mientras jugabas.", "  The CPU lowered its speed a lot (" + P(m.Perf) + " of its " + P(perfMax) + " max) while you were playing."));
                 L.Add(T("  Casi siempre es temperatura (se calienta y se frena solo) o energía (notebook a batería, plan de ahorro).", "  It is almost always temperature (it heats up and slows itself) or power (laptop on battery, power saver plan)."));
             }
+            // Si justo antes otro programa le saco el foco al juego, seguro tuvo que ver
+            string rq = ""; DateTime rf;
+            lock (cerrojoFoco) { rq = roboQuien; rf = roboFin; }
+            if (rq != "" && (DateTime.Now - rf).TotalSeconds < 15)
+                L.Add(T("  Justo antes, " + rq + ".exe le sacó el foco al juego: eso también da tirones.", "  Right before, " + rq + ".exe took focus away from the game: that also causes stutters."));
             List<string> pistas = new List<string>();
             if (culp != null && culp.Count > 0)
             {
