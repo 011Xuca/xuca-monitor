@@ -180,7 +180,7 @@ namespace Xuca
         CheckBox chkInicio, chkActivo;
         readonly List<Button> botones = new List<Button>();
         readonly Dictionary<Modulo, Button> pestanas = new Dictionary<Modulo, Button>();
-        Button bEsc, bReg, bLimp, bTema, bIdioma, bKofi;
+        Button bEsc, bReg, bLimp, bTema, bIdioma, bKofi, bOver;
         FlowLayoutPanel arriba, fila2;
         Panel medio, caja;
 
@@ -317,6 +317,7 @@ namespace Xuca
                 bool prender = !aj.TryGetValue(m.Clave, out on) || on != "0";
                 if (prender) m.Prender(true);
             }
+            try { OvMgr.Iniciar(Datos); } catch (Exception ex) { GuardarCrash(ex); }
             ActualizarTextos();
             EmpezarBusquedaAct();
             if (!oculto) MostrarVentana(); else Recortar();
@@ -336,6 +337,7 @@ namespace Xuca
             if (salir) return;
             salir = true;
             foreach (Modulo m in modulos) if (m.Activo) { try { m.Prender(false); } catch { } }
+            try { OvMgr.Detener(); } catch { }
             ni.Visible = false;
             ni.Dispose();
             if (fv != null) { fv.Dispose(); fv = null; }
@@ -603,6 +605,7 @@ namespace Xuca
                 bEsc.Text = T("Acceso directo en el escritorio", "Desktop shortcut");
                 bTema.Text = TextoTema();
                 bIdioma.Text = T("English", "Español");
+                bOver.Text = T("Overlay de FPS", "FPS overlay");
                 bKofi.Text = T("♥ Apoyar en Ko-fi", "♥ Support on Ko-fi");
                 chkActivo.Text = T("Activado", "Enabled");
                 chkActivo.Checked = actual.Activo;
@@ -757,6 +760,8 @@ namespace Xuca
                 GuardarAjuste("idioma", Modulo.Idioma);
                 ActualizarTextos();
             });
+
+            bOver = Boton(arriba, delegate { OvAjustes.Mostrar(); });
 
             // Ko-fi: celeste fijo, igual que en el Xuca OPtimizer (no cambia con el tema)
             bKofi = Boton(arriba, delegate { try { Process.Start("https://ko-fi.com/011xuca"); } catch { } });

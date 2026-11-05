@@ -439,7 +439,6 @@ namespace Xuca
         readonly Queue<Muestra> ultimas = new Queue<Muestra>();
         double perfMax;
         readonly Dictionary<string, DateTime> avisado = new Dictionary<string, DateTime>();
-        bool gpuAvisado;
 
         void Paso()
         {
@@ -450,7 +449,7 @@ namespace Xuca
                 // Empezo un juego (o se cambio de juego)
                 CerrarContadores();
                 pidJuego = pid; nomJuego = nom; JuegoAhora = nom;
-                ultimas.Clear(); perfMax = 0; avisado.Clear(); gpuAvisado = false;
+                ultimas.Clear(); perfMax = 0; avisado.Clear();
                 AbrirContadores();
                 Log(T("Jugando: ", "Playing: ") + nom);
                 return;
@@ -482,37 +481,20 @@ namespace Xuca
             // Algo tiene que pasar 3 segundos seguidos para contar (un pico suelto no baja los FPS)
             Muestra[] u = ultimas.ToArray();
             int n = u.Length;
-            bool cpuAlta = true, ramLlena = true, discoLleno = true, lento = true, gpuTope = true;
+            bool cpuAlta = true, ramLlena = true, discoLleno = true, lento = true;
             for (int i = n - 3; i < n; i++)
             {
                 cpuAlta &= u[i].Cpu >= 95;
                 ramLlena &= u[i].Ram >= 92;
                 discoLleno &= u[i].DiscoOcupado >= 90;
                 lento &= perfMax >= 80 && u[i].Perf >= 0 && u[i].Perf < perfMax * 0.65 && u[i].Cpu >= 30;
-                gpuTope &= u[i].Gpu >= 98;
             }
             string tipo = cpuAlta ? "cpu" : ramLlena ? "ram" : discoLleno ? "disco" : lento ? "lento" : null;
-            if (tipo == null)
-            {
-                if (gpuTope && !gpuAvisado) { gpuAvisado = true; AvisoGpu(m); }
-                return;
-            }
+            if (tipo == null) return;
             DateTime t;
             if (avisado.TryGetValue(tipo, out t) && (DateTime.Now - t).TotalMinutes < 3) return;
             avisado[tipo] = DateTime.Now;
             Reporte(tipo, m);
-        }
-
-        void AvisoGpu(Muestra m)
-        {
-            List<string> L = new List<string>();
-            L.Add(T("PLACA DE VIDEO AL MÁXIMO: ", "GRAPHICS CARD MAXED OUT: ") + Fecha(DateTime.Now) + "   (" + nomJuego + ")");
-            L.Add("");
-            L.Add(T("  La placa de video está al 100 %: el límite de FPS lo pone ella. Es normal en juegos exigentes.", "  The graphics card is at 100 %: it sets the FPS limit. It is normal in demanding games."));
-            L.Add(T("  Si querés más FPS o que no varíen tanto: bajá la calidad gráfica, la resolución, o limitá los FPS un poco por debajo de lo que te da.", "  If you want more FPS or steadier FPS: lower graphics quality, resolution, or cap FPS a bit below what you get."));
-            foreach (string x in L) Log(x);
-            Log("");
-            Agregar(string.Join("\r\n", L.ToArray()).TrimEnd(), 0);
         }
 
         string causaLento = "";

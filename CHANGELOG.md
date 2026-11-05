@@ -19,7 +19,15 @@ Todo lo que cambió en cada versión de **Xuca Monitor**. La más nueva va arrib
 - **Rendimiento**: cuando el procesador se frena, ahora dice si es temperatura o energía (antes solo podía adivinar).
 - Para la temperatura del procesador hace falta **PawnIO** (driver gratis y firmado, el mismo de LibreHardwareMonitor y FanControl): la pestaña PC tiene un botón para instalarlo y verifica su firma antes de abrirlo.
 
+- **Overlay de FPS** (botón "Overlay de FPS" arriba): muestra encima del juego FPS, 1 % low, frametime, gráfico de frametime, uso y temperatura de CPU y GPU, y RAM, como el de MSI Afterburner con RivaTuner. Elegís en qué procesos aparece, un atajo F1-F12 para ocultarlo y la esquina y posición. Los cambios se aplican al instante, tiene vista previa y podés exportar e importar el estilo.
+  - **100 % personalizable con una plantilla de texto**: cada línea que escribís es una línea del overlay. Usás variables entre llaves (`{gpu.name}`, `{fps}`, `{low1}`, `{ft}`, `{gpu.temp}`, `{gpu.vram}`, `{cpu.clock}`, `{ram.used}`...; hay una lista para insertar con un clic), con **color** (`<c=FF0000>`), **tamaño** (`<s=150>`), **negrita** (`<b>`), **formato** (`{gpu.power:0.0}`), **alerta por valor** (`{gpu.temp!75,85}`: naranja y rojo; `{fps!<60,30}` al revés para FPS) y **gráfico de frametime** con el tamaño que quieras (`{graph:260x40}`). Trae modelos listos, incluido uno estilo Afterburner.
+  - Fuente, tamaño, negrita, color base, y opacidad del texto y del fondo **por separado** (transparencia por pixel).
+  - **Seguro con anti-cheats**: no inyecta nada en el juego. Los FPS salen de los eventos de Windows (ETW, DXGI y D3D9), como PresentMon, y el texto va en una ventana transparente por la que pasan los clics. Se ve con el juego en pantalla completa sin bordes o en ventana, no en pantalla completa exclusiva.
+  - **Capturable con OBS**: es una ventana aparte llamada "Xuca Overlay", así que se agrega como fuente de **Captura de ventana**. Destildando "Ocultarlo cuando el juego no está al frente" se queda visible mientras el juego esté abierto, aunque estés mirando OBS.
+  - **Sin gasto cuando no jugás**: sin un juego de la lista abierto no hay sesión ETW ni lectura de sensores, solo un chequeo de procesos por segundo.
+
 ### Cambios
+- **Rendimiento**: se sacó el aviso "Placa de video al máximo". La GPU al 100 % jugando es lo normal (no hay cuello de botella) y el aviso parecía un problema sin serlo. Siguen los avisos de bajones reales: procesador, RAM, disco, tirones y pérdida de foco.
 - La app ahora **pide permisos de administrador** al abrir (los sensores lo necesitan).
 - "Iniciar con Windows" usa una tarea programada (los accesos directos no se elevan solos). Además arranca aunque la notebook esté a batería y no se cierra a las 72 horas (dos trampas de las tareas que arma Windows por defecto).
 - Si algo falla al abrir, en vez de cerrarse sin avisar muestra el error y lo guarda en Documentos\Xuca Monitor\crash.txt.
