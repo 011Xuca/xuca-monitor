@@ -450,7 +450,7 @@ namespace Xuca
             return (float)v.Valor;
         }
 
-        void Propias(Lectura L, InfoFija f)
+        public static void LeerRam(Lectura L)
         {
             MEMSTAT ms = new MEMSTAT(); ms.dwLength = Marshal.SizeOf(typeof(MEMSTAT));
             if (GlobalMemoryStatusEx(ref ms))
@@ -459,6 +459,11 @@ namespace Xuca
                 L.RamTotalGB = ms.total / 1073741824.0;
                 L.RamUsadaGB = (ms.total - ms.avail) / 1073741824.0;
             }
+        }
+
+        void Propias(Lectura L, InfoFija f)
+        {
+            LeerRam(L);
             // Sin PawnIO la libreria no puede medir los MHz de los nucleos: se usa lo que calcula Windows
             // (lo mismo que muestra el Administrador de tareas: velocidad base x % de rendimiento)
             if (pdhQ != IntPtr.Zero)

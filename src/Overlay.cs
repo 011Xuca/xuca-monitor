@@ -849,7 +849,11 @@ namespace Xuca
                 try { s = new Sensores(); s.Abrir(); } catch { s = null; }
                 while (sensoresOn && s != null)
                 {
-                    try { Lectura l = new Lectura(); s.Leer(l); lock (lkSens) { ultima = l; } } catch { }
+                    try { Lectura l = new Lectura(); s.Leer(l); MonitorPC.LeerRam(l);
+                        // Sin PawnIO la libreria no da MHz ni uso de CPU: se toman los que calcula Windows en el monitor de PC (si esta andando)
+                        Lectura pcL = MonitorPC.Instancia != null ? MonitorPC.Instancia.Ultima : null;
+                        if (pcL != null) { if (!l.CpuClockProm.HasValue) l.CpuClockProm = pcL.CpuClockProm; if (!l.CpuLoad.HasValue) l.CpuLoad = pcL.CpuLoad; }
+                        lock (lkSens) { ultima = l; } } catch { }
                     for (int i = 0; i < 10 && sensoresOn; i++) Thread.Sleep(100);
                 }
                 if (s != null) { try { s.Cerrar(); } catch { } }
