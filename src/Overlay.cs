@@ -984,7 +984,7 @@ namespace Xuca
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(580, 700);
+            ClientSize = new Size(640, Math.Min(880, Screen.PrimaryScreen.WorkingArea.Height - 100));
             MinimumSize = new Size(480, 400);
             Font = new Font("Segoe UI", 9f);
 
