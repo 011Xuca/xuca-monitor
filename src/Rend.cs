@@ -52,6 +52,7 @@ namespace Xuca
             if (tidFoco != 0) PostThreadMessage(tidFoco, 0x12, IntPtr.Zero, IntPtr.Zero); // WM_QUIT
             if (hiloFoco != null) hiloFoco.Join(2000);
             if (hilo != null) hilo.Join(3000);
+            JuegoAhora = "";
         }
 
         bool Dormir(int ms) { return despertar.WaitOne(ms) || parar; }
@@ -67,11 +68,13 @@ namespace Xuca
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
 
         // Programas en pantalla completa que no son juegos
-        static readonly Regex NoJuego = new Regex("^(explorer|chrome|msedge|firefox|opera|opera_gx|brave|vivaldi|vlc|mpc-hc64|mpc-hc|mpc-be64|potplayer|potplayermini64|wmplayer|applicationframehost|lockapp|searchhost|startmenuexperiencehost|shellexperiencehost|textinputhost|powerpnt|xucamonitor|obs64|discord|spotify|steamwebhelper)$", RegexOptions.IgnoreCase);
+        static readonly Regex NoJuego = new Regex("^(explorer|chrome|msedge|firefox|opera|opera_gx|brave|vivaldi|vlc|mpc-hc64|mpc-hc|mpc-be64|potplayer|potplayermini64|wmplayer|applicationframehost|lockapp|searchhost|startmenuexperiencehost|shellexperiencehost|textinputhost|powerpnt|xucamonitor|obs64|discord|spotify|steamwebhelper|snippingtool|screenclippinghost|screensketch|snagit32|snagiteditor|sharex)$", RegexOptions.IgnoreCase);
 
         static readonly int miPid = Process.GetCurrentProcess().Id;
         volatile int pidJuego;
         string nomJuego = "";
+        // El juego que se esta jugando ahora (lo usa la pestaña PC para los maximos "jugando" y el contexto de los avisos)
+        public static volatile string JuegoAhora = "";
 
         // Devuelve el pid del juego en pantalla completa que esta adelante (0 si no hay)
         int JuegoAdelante(out string nombre)
@@ -446,7 +449,7 @@ namespace Xuca
             {
                 // Empezo un juego (o se cambio de juego)
                 CerrarContadores();
-                pidJuego = pid; nomJuego = nom;
+                pidJuego = pid; nomJuego = nom; JuegoAhora = nom;
                 ultimas.Clear(); perfMax = 0; avisado.Clear(); gpuAvisado = false;
                 AbrirContadores();
                 Log(T("Jugando: ", "Playing: ") + nom);
@@ -463,7 +466,7 @@ namespace Xuca
                 if (!vivo || (DateTime.Now - fueraDesde).TotalSeconds > 60)
                 {
                     Log(T("Dejó de jugar: ", "Stopped playing: ") + nomJuego);
-                    pidJuego = 0; nomJuego = ""; CerrarContadores(); ultimas.Clear();
+                    pidJuego = 0; nomJuego = ""; JuegoAhora = ""; CerrarContadores(); ultimas.Clear();
                 }
                 return;
             }
@@ -512,6 +515,8 @@ namespace Xuca
             Agregar(string.Join("\r\n", L.ToArray()).TrimEnd(), 0);
         }
 
+        string causaLento = "";
+
         void Reporte(string tipo, Muestra m)
         {
             List<Uso> cpu, disco, ram;
@@ -541,7 +546,24 @@ namespace Xuca
             else
             {
                 L.Add(T("  El procesador bajó mucho su velocidad (" + P(m.Perf) + " de su máximo de " + P(perfMax) + ") mientras jugabas.", "  The CPU lowered its speed a lot (" + P(m.Perf) + " of its " + P(perfMax) + " max) while you were playing."));
-                L.Add(T("  Casi siempre es temperatura (se calienta y se frena solo) o energía (notebook a batería, plan de ahorro).", "  It is almost always temperature (it heats up and slows itself) or power (laptop on battery, power saver plan)."));
+                // Con la pestaña PC prendida se sabe si fue temperatura o energia (antes solo se podia adivinar)
+                Xuca.Foto f = MonitorPC.PicoEntre(DateTime.Now.AddSeconds(-15), DateTime.Now.AddSeconds(1));
+                int tj = MonitorPC.TjMax;
+                if (f != null && Xuca.Foto.Hay(f.CpuT) && f.CpuT >= tj - 6)
+                {
+                    causaLento = "temp";
+                    L.Add(T("  Es TEMPERATURA: el procesador está a " + (int)f.CpuT + " °C y su límite es " + tj + " °C, así que se frena solo para no dañarse.", "  It is TEMPERATURE: the CPU is at " + (int)f.CpuT + " °C and its limit is " + tj + " °C, so it throttles itself to avoid damage."));
+                }
+                else if (f != null && Xuca.Foto.Hay(f.CpuT))
+                {
+                    causaLento = "energia";
+                    L.Add(T("  No es temperatura (el procesador está a " + (int)f.CpuT + " °C, lejos de su límite de " + tj + " °C): es ENERGÍA. Plan de energía en ahorro, notebook a batería o un límite de potencia de la placa madre.", "  It is not temperature (the CPU is at " + (int)f.CpuT + " °C, far from its " + tj + " °C limit): it is POWER. Power saver plan, laptop on battery or a motherboard power limit."));
+                }
+                else
+                {
+                    causaLento = "";
+                    L.Add(T("  Casi siempre es temperatura (se calienta y se frena solo) o energía (notebook a batería, plan de ahorro). Con la pestaña PC prendida (y PawnIO instalado) se sabe cuál de las dos.", "  It is almost always temperature (it heats up and slows itself) or power (laptop on battery, power saver plan). With the PC tab on (and PawnIO installed) you can tell which."));
+                }
             }
             // Si justo antes otro programa le saco el foco al juego, seguro tuvo que ver
             string rq = ""; DateTime rf;
@@ -571,8 +593,8 @@ namespace Xuca
             if (tipo == "disco") L.Add(T("  - Si el juego está en un disco HDD, pasalo a un SSD. Revisá la salud del disco con CrystalDiskInfo.", "  - If the game is on an HDD, move it to an SSD. Check the drive health with CrystalDiskInfo."));
             if (tipo == "lento")
             {
-                L.Add(T("  - Mirá la temperatura del procesador con HWiNFO mientras jugás. Si pasa de 90 °C, revisá el cooler, la pasta térmica y el polvo.", "  - Check the CPU temperature with HWiNFO while gaming. If it goes over 90 °C, check the cooler, thermal paste and dust."));
-                L.Add(T("  - En notebook: jugá enchufada y con el plan de energía en rendimiento.", "  - On a laptop: play plugged in and on a performance power plan."));
+                if (causaLento != "energia") L.Add(T("  - Limpiá el polvo del cooler y del gabinete, y revisá la pasta térmica (si tiene más de 3-4 años, cambiala). En la pestaña PC > CPU ves la temperatura en vivo.", "  - Clean the dust from the cooler and case, and check the thermal paste (replace it if it is over 3-4 years old). The PC > CPU tab shows the temperature live."));
+                if (causaLento != "temp") L.Add(T("  - Poné el plan de energía en Equilibrado o Alto rendimiento. En notebook: jugá enchufada.", "  - Set the power plan to Balanced or High performance. On a laptop: play plugged in."));
             }
             L.Add("");
             L.Add(T("DATOS:", "DATA:"));
@@ -580,6 +602,8 @@ namespace Xuca
                 + "   ·   RAM: " + P(m.Ram)
                 + (m.DiscoOcupado >= 0 ? T("   ·   disco más ocupado: ", "   ·   busiest drive: ") + P(m.DiscoOcupado) : "")
                 + (m.Gpu >= 0 ? T("   ·   placa de video: ", "   ·   graphics card: ") + P(m.Gpu) : ""));
+            string pc = MonitorPC.ResumenAhora();
+            if (pc != "") L.Add(T("  Sensores: ", "  Sensors: ") + pc);
 
             foreach (string x in L) Log(x);
             Log("");

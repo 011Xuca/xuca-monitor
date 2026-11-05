@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.Eventing.Reader;
+using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading;
 
@@ -118,7 +119,7 @@ namespace Xuca
         }
 
         // ---------- Que es cada evento ----------
-        class Aviso { public string Tipo, Titulo; public List<string> Que = new List<string>(), Probar = new List<string>(); public DateTime T; public List<string> Crudo = new List<string>(); }
+        class Aviso { public string Tipo, Titulo; public List<string> Que = new List<string>(), Probar = new List<string>(), Pc = new List<string>(); public DateTime T; public List<string> Crudo = new List<string>(); }
 
         static int Prop(EventRecord e, int i, out string s)
         {
@@ -175,11 +176,18 @@ namespace Xuca
                 DateTime u;
                 if (ultimo.TryGetValue(k, out u) && (a.T - u).TotalMinutes < 10 && a.Tipo != "pantallazo" && a.Tipo != "apagon") continue;
                 ultimo[k] = a.T;
+                try { ContextoPc(a); } catch { }
                 List<string> L = new List<string>();
                 L.Add(a.Titulo + ": " + Fecha(a.T));
                 L.Add("");
                 L.Add(T("QUÉ PASÓ:", "WHAT HAPPENED:"));
                 foreach (string x in a.Que) L.Add("  " + x);
+                if (a.Pc.Count > 0)
+                {
+                    L.Add("");
+                    L.Add(T("CÓMO ESTABA LA PC:", "HOW THE PC WAS:"));
+                    foreach (string x in a.Pc) L.Add("  " + x);
+                }
                 if (a.Probar.Count > 0)
                 {
                     L.Add("");
@@ -192,6 +200,77 @@ namespace Xuca
                 foreach (string x in L) Log(x);
                 Log("");
                 Agregar(string.Join("\r\n", L.ToArray()).TrimEnd(), 1);
+            }
+        }
+
+        // ---------- Como estaba la PC cuando paso (si la pestaña PC esta prendida) ----------
+        // Para pantallazos y apagones se usa lo ultimo que anoto antes del corte (queda guardado en disco).
+        void ContextoPc(Aviso a)
+        {
+            if (MonitorPC.Instancia == null || !MonitorPC.Instancia.Activo) return;
+            int tj = MonitorPC.TjMax;
+            Foto p;
+            if (a.Tipo == "pantallazo" || a.Tipo == "apagon")
+            {
+                DateTime ult;
+                p = MonitorPC.PicoAntesDelCorte(Path.GetDirectoryName(LogF), out ult);
+                if (p == null) return;
+                DateTime arranque = DateTime.Now.AddMilliseconds(-(double)GetTickCount64());
+                if ((arranque - ult).TotalMinutes > 15)
+                {
+                    a.Pc.Add(T("Lo último que anotó la pestaña PC es de las " + ult.ToString("HH:mm") + ", bastante antes del corte: no hay datos de justo antes.", "The last thing the PC tab logged is from " + ult.ToString("HH:mm") + ", well before the crash: there is no data from right before."));
+                    return;
+                }
+                a.Pc.Add(T("Lo último que anotó antes del corte (" + ult.ToString("HH:mm:ss") + "), con los picos de sus últimos 2 minutos:", "The last thing logged before the crash (" + ult.ToString("HH:mm:ss") + "), with the peaks of its last 2 minutes:"));
+            }
+            else
+            {
+                p = MonitorPC.PicoEntre(a.T.AddSeconds(-90), a.T.AddSeconds(5));
+                if (p == null) return;
+                a.Pc.Add(T("Picos del último minuto y medio antes de que pasara:", "Peaks in the 90 seconds before it happened:"));
+            }
+            string res = MonitorPC.Resumen(p);
+            if (res == "") { a.Pc.Clear(); return; }
+            a.Pc.Add("  " + res);
+            bool cpuCal = Foto.Hay(p.CpuT) && p.CpuT >= tj - 3;
+            bool gpuCal = (Foto.Hay(p.GpuT) && p.GpuT >= 87) || (Foto.Hay(p.GpuH) && p.GpuH >= 105);
+            bool hayTemps = Foto.Hay(p.CpuT) || Foto.Hay(p.GpuT);
+            switch (a.Tipo)
+            {
+                case "video":
+                    if (gpuCal)
+                    {
+                        a.Pc.Add(T("→ La placa de video estaba muy caliente: es muy probable que el calor haya colgado el driver.", "→ The graphics card was very hot: heat very likely hung the driver."));
+                        a.Probar.Insert(0, T("Primero lo térmico: limpiá el polvo de la placa, fijate que sus ventiladores giren y, si el hot spot pasa al núcleo por más de 25 °C, cambiá la pasta térmica.", "Thermals first: clean the dust off the card, check its fans spin and, if the hot spot is more than 25 °C above the core, replace the thermal paste."));
+                    }
+                    else if (Foto.Hay(p.GpuT))
+                        a.Pc.Add(T("→ La temperatura de la placa estaba bien (" + (int)p.GpuT + " °C): no fue por calor. Lo más probable es el driver, un overclock/undervolt o la fuente.", "→ The card temperature was fine (" + (int)p.GpuT + " °C): it was not heat. Most likely the driver, an overclock/undervolt or the power supply."));
+                    if (Foto.Hay(p.GpuW) && p.GpuW >= 250)
+                        a.Pc.Add(T("→ Estaba consumiendo " + (int)p.GpuW + " W: si la fuente es justa o vieja, un pico así puede hacer que la placa se corte.", "→ It was drawing " + (int)p.GpuW + " W: if the power supply is borderline or old, a spike like that can make the card drop out."));
+                    break;
+                case "apagon":
+                case "pantallazo":
+                    if (cpuCal || gpuCal)
+                    {
+                        a.Pc.Add(T("→ Justo antes estaba muy caliente: un apagado por temperatura es posible (la PC se corta sola para protegerse).", "→ Right before, it was very hot: a thermal shutdown is possible (the PC cuts off to protect itself)."));
+                        if (a.Tipo == "apagon") a.Probar.Insert(0, T("Revisá la refrigeración antes que nada: polvo, ventiladores y pasta térmica.", "Check cooling before anything else: dust, fans and thermal paste."));
+                    }
+                    else if (hayTemps)
+                        a.Pc.Add(T("→ Las temperaturas estaban normales justo antes: no parece ser calor.", "→ Temperatures were normal right before: it does not look like heat."));
+                    if (a.Tipo == "apagon" && !cpuCal && !gpuCal && p.Juego != "")
+                        a.Pc.Add(T("→ Estabas jugando (" + p.Juego + ")" + (Foto.Hay(p.GpuW) ? " con la placa a " + (int)p.GpuW + " W" : "") + ": un apagón de golpe jugando, sin calor, casi siempre es la fuente de poder.", "→ You were playing (" + p.Juego + ")" + (Foto.Hay(p.GpuW) ? " with the card at " + (int)p.GpuW + " W" : "") + ": a sudden shutdown while gaming, without heat, is almost always the power supply."));
+                    break;
+                case "app":
+                    if (gpuCal || cpuCal) a.Pc.Add(T("→ La PC estaba muy caliente cuando se cerró: puede tener que ver.", "→ The PC was very hot when it closed: it may be related."));
+                    else if (hayTemps) a.Pc.Add(T("→ Temperaturas normales: no fue por calor.", "→ Normal temperatures: it was not heat."));
+                    break;
+                case "cpu":
+                    if (Foto.Hay(p.CpuT) && p.CpuT >= tj - 6) a.Pc.Add(T("→ Es temperatura: el procesador llegó a " + (int)p.CpuT + " °C y su límite es " + tj + " °C.", "→ It is temperature: the CPU reached " + (int)p.CpuT + " °C and its limit is " + tj + " °C."));
+                    else if (Foto.Hay(p.CpuT)) a.Pc.Add(T("→ No es temperatura (" + (int)p.CpuT + " °C): es un límite de energía (plan de energía, notebook a batería o límites de la BIOS).", "→ It is not temperature (" + (int)p.CpuT + " °C): it is a power limit (power plan, laptop on battery or BIOS limits)."));
+                    break;
+                case "hardware":
+                    if (cpuCal) a.Pc.Add(T("→ El procesador estaba en su límite de temperatura: el calor puede causar este tipo de errores.", "→ The CPU was at its temperature limit: heat can cause this kind of error."));
+                    break;
             }
         }
 
@@ -234,7 +313,7 @@ namespace Xuca
                     a.Que.Add(T("Por eso la pantalla se pone negra unos segundos o el juego se cierra.", "That is why the screen goes black for a few seconds or the game closes."));
                     a.Probar.Add(T("Si tenés overclock o undervolt en la placa de video (MSI Afterburner, etc.), sacalo.", "If you have an overclock or undervolt on the graphics card (MSI Afterburner, etc.), remove it."));
                     a.Probar.Add(T("Reinstalá el driver de video limpio: DDU y después el driver nuevo (DDU está en Apps recomendadas del Xuca OPtimizer).", "Reinstall the video driver cleanly: DDU and then the new driver (DDU is in Xuca OPtimizer's Recommended apps)."));
-                    a.Probar.Add(T("Mirá la temperatura de la placa con HWiNFO. Si pasa de 85 °C, limpiá el polvo.", "Check the card temperature with HWiNFO. If it goes over 85 °C, clean the dust."));
+                    a.Probar.Add(T("Mirá la temperatura de la placa en la pestaña PC > GPU mientras jugás. Si pasa de 85 °C (o el hot spot de 100 °C), limpiá el polvo.", "Check the card temperature in the PC > GPU tab while gaming. If it goes over 85 °C (or the hot spot over 100 °C), clean the dust."));
                     a.Probar.Add(T("Si se repite con juegos pesados, puede ser la fuente (poca potencia o vieja).", "If it keeps happening with heavy games, it can be the power supply (too weak or old)."));
                     break;
                 case "pantallazo":
@@ -254,7 +333,7 @@ namespace Xuca
                     a.Titulo = T("APAGÓN / REINICIO DE GOLPE", "SUDDEN SHUTDOWN / RESTART");
                     a.Que.Add(T("La PC se apagó o se reinició de golpe, sin pantallazo azul y sin apagarse bien.", "The PC turned off or restarted suddenly, without a blue screen and without shutting down properly."));
                     a.Que.Add(T("Si no fue un corte de luz ni el botón, casi siempre es la fuente o la temperatura.", "If it was not a power cut or the button, it is almost always the power supply or the temperature."));
-                    a.Probar.Add(T("Mirá las temperaturas con HWiNFO jugando: procesador por debajo de 90 °C, placa de video por debajo de 85 °C.", "Check temperatures with HWiNFO while gaming: CPU below 90 °C, graphics card below 85 °C."));
+                    a.Probar.Add(T("Mirá las temperaturas en la pestaña PC mientras jugás: que nada llegue al rojo.", "Check temperatures in the PC tab while gaming: nothing should reach red."));
                     a.Probar.Add(T("Si pasa con juegos pesados, la fuente puede quedarse corta. Probá con OCCT (prueba de fuente) para confirmarlo.", "If it happens with heavy games, the power supply may not be enough. Test with OCCT (power test) to confirm it."));
                     a.Probar.Add(T("Si tenés overclock o undervolt, sacalo.", "If you have overclock or undervolt, remove it."));
                     break;
@@ -287,7 +366,7 @@ namespace Xuca
                 case "cpu":
                     a.Titulo = T("PROCESADOR LIMITADO", "CPU LIMITED");
                     a.Que.Add(T("La placa madre bajó la velocidad del procesador (por temperatura o por energía). Eso baja los FPS.", "The motherboard lowered the CPU speed (because of temperature or power). That lowers FPS."));
-                    a.Probar.Add(T("Mirá la temperatura del procesador con HWiNFO. Si pasa de 90 °C, revisá el cooler y la pasta térmica.", "Check the CPU temperature with HWiNFO. If it goes over 90 °C, check the cooler and thermal paste."));
+                    a.Probar.Add(T("Mirá la temperatura del procesador en la pestaña PC > CPU. Si llega al rojo, revisá el cooler y la pasta térmica.", "Check the CPU temperature in the PC > CPU tab. If it reaches red, check the cooler and thermal paste."));
                     a.Probar.Add(T("En notebook: usala enchufada y con el plan de energía en rendimiento.", "On a laptop: keep it plugged in and on a performance power plan."));
                     break;
                 case "app":

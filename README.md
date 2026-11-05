@@ -2,7 +2,7 @@
 
 # Xuca Monitor
 
-App gratis para **Windows 10 y 11** que vigila tu PC desde la bandeja (al lado del reloj): **internet**, **USB**, **rendimiento en juegos** y **errores de Windows**. Cuando se corta internet, sube el ping, se desconecta algo, bajan los FPS, la pantalla se pone negra o hay un pantallazo azul, te dice **qué fue y qué probar**. Pesa unos 150 KB y casi no gasta memoria ni procesador.
+App gratis para **Windows 10 y 11** que vigila tu PC desde la bandeja (al lado del reloj): **internet**, **USB**, **rendimiento en juegos**, **errores de Windows** y **temperaturas/estado del hardware**. Cuando se corta internet, sube el ping, se desconecta algo, bajan los FPS, la pantalla se pone negra, hay un pantallazo azul o el procesador/placa de video se calienta de más, te dice **qué fue y qué probar**.
 
 ## Descargar
 
@@ -12,14 +12,19 @@ No hace falta instalar nada: lo abrís y listo. Usa el .NET que ya trae Windows.
 
 > La primera vez Windows puede mostrar un cartel azul (SmartScreen) porque el `.exe` no está firmado. Tocá **Más información** y después **Ejecutar de todas formas**.
 
+> **Pide permisos de administrador al abrir.** Es necesario para leer los sensores reales (temperaturas, vatios, discos). Si le decís que no a ese permiso, la app no abre.
+>
+> **Temperatura del procesador:** además hace falta **PawnIO**, un driver gratis y firmado (el mismo que usan LibreHardwareMonitor y FanControl). La pestaña PC tiene un botón para instalarlo; sin él se ve todo lo demás (placa de video, RAM, discos).
+
 ## Qué hace
 
 | Pestaña | Para qué sirve |
 |---|---|
 | **Red** | Avisa cuando se **corta internet** y te dice si fue la placa de red (cable o WiFi), el router o tu proveedor. También avisa cuando el **ping sube y se queda alto (lag)**: mide el ping al router, cuánto está bajando o subiendo la PC, qué programas suelen usar mucho internet y si algún driver está perdiendo memoria. |
 | **USB** | Cuando suena el ruido de Windows de "se desconectó algo", te dice **qué aparato fue** (mouse, teclado, auriculares, monitor, Bluetooth...), si volvió a conectarse solo y qué conviene probar. |
-| **Rendimiento** | Mientras jugás en pantalla completa, vigila procesador, RAM, disco y placa de video. Cuando algo **hace bajar los FPS** te dice el culpable: un programa de fondo (Windows Update, el antivirus, un launcher descargando...), el procesador que se frena por temperatura, la RAM llena o el disco al 100 %. También avisa si **otro programa le saca el foco al juego** sin que toques nada (Discord, Steam, un aviso de Windows...). No mide los FPS exactos (eso pide permisos de administrador): detecta lo que los hace bajar. |
-| **Errores** | Te avisa cuando la **pantalla se pone negra** porque se colgó el driver de video, cuando hay un **pantallazo azul** (con el código explicado), cuando la PC **se apaga de golpe**, cuando hay errores de hardware, del disco o falta de memoria, y cuando un **juego o programa se cierra solo** (y en qué falló: driver de NVIDIA/AMD, un overlay...). |
+| **Rendimiento** | Mientras jugás en pantalla completa, vigila procesador, RAM, disco y placa de video. Cuando algo **hace bajar los FPS** te dice el culpable: un programa de fondo (Windows Update, el antivirus, un launcher descargando...), el procesador que se frena por temperatura, la RAM llena o el disco al 100 %. También avisa si **otro programa le saca el foco al juego** sin que toques nada (Discord, Steam, un aviso de Windows...). No mide los FPS exactos: detecta lo que los hace bajar. Con la pestaña PC prendida sabe si el procesador se frena por temperatura o por energía. |
+| **Errores** | Te avisa cuando la **pantalla se pone negra** porque se colgó el driver de video, cuando hay un **pantallazo azul** (con el código explicado), cuando la PC **se apaga de golpe**, cuando hay errores de hardware, del disco o falta de memoria, y cuando un **juego o programa se cierra solo** (y en qué falló: driver de NVIDIA/AMD, un overlay...). Con la pestaña PC prendida también dice **cómo estaba la PC justo antes** y si fue por calor o no. |
+| **PC** | Temperatura, uso, velocidad y potencia **reales** del procesador y la placa de video (núcleo, hot spot y memoria), RAM (y si el XMP/EXPO está activo o anda en single channel), discos (temperatura y vida útil), ventiladores, placa madre y BIOS. Todo en verde, amarillo o rojo. Avisa cosas concretas: procesador frenándose por calor, hot spot muy separado del núcleo (pasta térmica), ventiladores parados, VRAM o RAM llena (y qué la llena), conector 12VHPWR sobrecargado, disco gastado. Tiene 5 categorías (General, CPU, GPU, RAM, Discos), cada una con su registro y su casilla "Guardar avisos". |
 
 - Cada pestaña se puede **prender o apagar** con la casilla **Activado** (o con clic derecho en el ícono de la bandeja). Apagada no gasta nada.
 - Muestra las opciones de red del [Xuca OPtimizer](https://github.com/011Xuca/xuca-optimizer) que tenés aplicadas, así sabés si alguna tiene que ver.
@@ -41,15 +46,18 @@ No hace falta instalar nada: lo abrís y listo. Usa el .NET que ya trae Windows.
 
 Todo queda en **Documentos\Xuca Monitor**:
 
-- `registro_*.txt` (red, usb, rendimiento y errores): todo lo que detectó cada pestaña, con hora (botón **Abrir registro**).
+- `registro_*.txt` (red, usb, rendimiento, errores y pc con sus categorías): todo lo que detectó cada pestaña, con hora (botón **Abrir registro**).
 - `historial_*.txt`: lo que ves en la ventana (los últimos 300 avisos de cada pestaña). **Limpiar** lo borra.
+- `pc_ultimos_minutos.txt`: cómo estuvo la PC en los últimos 5 minutos (sirve para saber si un apagón fue por temperatura).
 - `ajustes_monitores.txt`: tema, idioma, zoom y qué pestañas están prendidas.
 
 ## Compilarlo vos
 
-El código está en `src` (C# para .NET Framework 4.8). Abrí `compilar.bat` y te arma `XucaMonitor.exe` con el compilador que ya trae Windows. No hace falta instalar nada.
+El código está en `src` (C# 5 para .NET Framework 4.8). Abrí `compilar.bat` y te arma `XucaMonitor.exe` con el compilador que ya trae Windows. No hace falta instalar nada. Las dll de la carpeta `lib` (sensores) se meten **adentro** del `.exe`: el resultado es un solo archivo que anda en cualquier carpeta.
 
 ## Créditos
 
 Hecho por **011Xuca**. Redes: https://linktr.ee/011xuca
 Si te sirvió, podés apoyarme en Ko-fi: https://ko-fi.com/011xuca
+
+Las temperaturas y sensores de hardware usan [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) (licencia MPL-2.0).

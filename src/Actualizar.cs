@@ -118,6 +118,7 @@ namespace Xuca
                     // Que sea un .exe de verdad y completo
                     byte[] b = File.ReadAllBytes(nuevo);
                     if (b.Length < 20000 || b[0] != (byte)'M' || b[1] != (byte)'Z') throw new Exception(T("la descarga vino incompleta", "the download was incomplete"));
+
                     // Windows deja renombrar un .exe abierto: el viejo pasa a .viejo y el nuevo toma su lugar
                     try { File.Delete(viejo); } catch { }
                     File.Move(Exe, viejo);

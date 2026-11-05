@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -43,6 +44,10 @@ namespace Xuca
 
         protected abstract void Empezar();
         protected abstract void Terminar();
+
+        // Un modulo puede mostrar un panel propio arriba del cuadro de texto (por ej. los sensores de PC).
+        // Se pide una sola vez por ventana abierta; null = no hay nada extra que mostrar.
+        public virtual Control PanelExtra() { return null; }
 
         public string Nombre { get { return T(NombreEs, NombreEn); } }
 
@@ -111,7 +116,8 @@ namespace Xuca
         // Aviso que se ve en la ventana pero no se guarda
         protected void Avisar(string texto) { App.Aviso(this, texto); }
 
-        internal void Limpiar()
+        // Virtual: un modulo con sub-categorias (PC) la pisa para limpiar solo la categoria que se esta viendo.
+        internal virtual void Limpiar()
         {
             lock (Cerrojo)
             {
@@ -121,7 +127,7 @@ namespace Xuca
             }
         }
 
-        internal string Texto()
+        internal virtual string Texto()
         {
             StringBuilder sb = new StringBuilder();
             lock (Cerrojo)
@@ -137,7 +143,7 @@ namespace Xuca
             return Activo ? T(VacioEs, VacioEn) : T(ApagadoEs, ApagadoEn);
         }
 
-        internal int Contador() { lock (Cerrojo) return Cuenta; }
+        internal virtual int Contador() { lock (Cerrojo) return Cuenta; }
 
         // Pasa trabajo al hilo de la ventana
         protected void EnUi(MethodInvoker m) { App.EnUi(m); }
@@ -148,7 +154,7 @@ namespace Xuca
     {
         public const string Nombre = "Xuca Monitor";
         // Al sacar una version nueva: cambiar esto y subir el .exe a un Release de GitHub con el tag "v" + Version
-        public const string Version = "1.0.2";
+        public const string Version = "1.0.3";
 
         string Dir, Datos, CfgF, Exe, InicioLnk;
         readonly List<Modulo> modulos = new List<Modulo>();
@@ -170,6 +176,7 @@ namespace Xuca
         Form fv;
         TextBox tb;
         Label estado;
+        Panel panelExtra;
         CheckBox chkInicio, chkActivo;
         readonly List<Button> botones = new List<Button>();
         readonly Dictionary<Modulo, Button> pestanas = new Dictionary<Modulo, Button>();
@@ -178,6 +185,14 @@ namespace Xuca
         Panel medio, caja;
 
         static string T(string es, string en) { return Modulo.T(es, en); }
+
+        // Aparte, sin inline: si falta una dll de "lib" el error de carga queda adentro de este metodo nomas.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static Modulo CrearModuloPC()
+        {
+            try { return new MonitorPC(); }
+            catch (Exception ex) { GuardarCrash(ex); return null; }
+        }
 
         // Devuelve false si ya habia otro abierto (a ese se le pide que muestre su ventana)
         public bool Iniciar(bool oculto, bool actualizado)
@@ -239,6 +254,10 @@ namespace Xuca
             modulos.Add(new MonitorUsb());
             modulos.Add(new MonitorRend());
             modulos.Add(new MonitorErrores());
+            // Si falta alguna dll de la carpeta "lib" (sensores), que no se caiga toda la app: se guarda el error y
+            // se sigue sin la pestaña PC.
+            Modulo pc = CrearModuloPC();
+            if (pc != null) modulos.Add(pc);
             foreach (Modulo m in modulos)
             {
                 m.App = this;
@@ -287,7 +306,10 @@ namespace Xuca
                 string f = Path.Combine(inicio, viejo);
                 if (File.Exists(f)) { habiaViejo = true; try { File.Delete(f); } catch { } }
             }
-            if (habiaViejo || File.Exists(InicioLnk)) { try { Acceso(InicioLnk, "/inicio"); } catch { } }
+            // Desde que la app pide administrador, el acceso directo de la carpeta de Inicio ya no alcanza
+            // (Windows no lo eleva solo): el "Iniciar con Windows" pasa a ser una tarea programada.
+            if (File.Exists(InicioLnk)) { try { File.Delete(InicioLnk); } catch { } habiaViejo = true; }
+            if (habiaViejo || TareaExiste()) { try { TareaCrear(); } catch { } }
 
             foreach (Modulo m in modulos)
             {
@@ -411,6 +433,88 @@ namespace Xuca
             finally { Marshal.FinalReleaseComObject(sh); }
         }
 
+        // ---------- Iniciar con Windows (tarea programada) ----------
+        // Como la app pide administrador, un acceso directo en la carpeta de Inicio no la eleva sola:
+        // Windows no la arranca (o la arranca sin permisos). Por eso "Iniciar con Windows" usa una tarea
+        // programada con "Ejecutar con los privilegios más altos", que SI se eleva solita al iniciar sesión.
+        const string TareaNombre = "XucaMonitor_Inicio";
+
+        string UltimoError = "";
+
+        int Schtasks(string args)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo("schtasks.exe", args);
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                using (Process p = Process.Start(psi))
+                {
+                    string err = p.StandardError.ReadToEnd() + p.StandardOutput.ReadToEnd();
+                    p.WaitForExit(5000);
+                    UltimoError = err.Trim();
+                    return p.ExitCode;
+                }
+            }
+            catch { return -1; }
+        }
+
+        bool TareaExiste()
+        {
+            return Schtasks("/query /tn \"" + TareaNombre + "\"") == 0;
+        }
+
+        // Se crea con un XML propio porque la tarea que arma "schtasks /sc onlogon" trae dos trampas de Windows:
+        // no arranca si la notebook esta a bateria, y MATA el programa a las 72 horas de andar.
+        void TareaCrear()
+        {
+            string usuario = Environment.UserDomainName + "\\" + Environment.UserName;
+            string xml =
+                "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
+                "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
+                "  <RegistrationInfo><Description>Abre Xuca Monitor al iniciar sesion</Description></RegistrationInfo>\r\n" +
+                "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + Xml(usuario) + "</UserId><Delay>PT10S</Delay></LogonTrigger></Triggers>\r\n" +
+                "  <Principals><Principal id=\"Author\"><UserId>" + Xml(usuario) + "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\r\n" +
+                "  <Settings>\r\n" +
+                "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\r\n" +
+                "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\r\n" +
+                "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n" +
+                "    <AllowHardTerminate>true</AllowHardTerminate>\r\n" +
+                "    <StartWhenAvailable>false</StartWhenAvailable>\r\n" +
+                "    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\r\n" +
+                "    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>\r\n" +
+                "    <AllowStartOnDemand>true</AllowStartOnDemand>\r\n" +
+                "    <Enabled>true</Enabled>\r\n" +
+                "    <Hidden>false</Hidden>\r\n" +
+                "    <RunOnlyIfIdle>false</RunOnlyIfIdle>\r\n" +
+                "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n" +
+                "    <Priority>7</Priority>\r\n" +
+                "  </Settings>\r\n" +
+                "  <Actions Context=\"Author\"><Exec><Command>" + Xml(Exe) + "</Command><Arguments>/inicio</Arguments><WorkingDirectory>" + Xml(Dir) + "</WorkingDirectory></Exec></Actions>\r\n" +
+                "</Task>\r\n";
+            string arch = Path.Combine(Path.GetTempPath(), "XucaMonitor_tarea.xml");
+            try
+            {
+                File.WriteAllText(arch, xml, Encoding.Unicode);
+                if (Schtasks("/create /tn \"" + TareaNombre + "\" /xml \"" + arch + "\" /f") != 0)
+                {
+                    // Si el XML no se pudo usar, por lo menos la forma simple
+                    string trValor = "\\\"" + Exe + "\\\" /inicio";
+                    Schtasks("/create /tn \"" + TareaNombre + "\" /tr \"" + trValor + "\" /sc onlogon /rl highest /f");
+                }
+            }
+            finally { try { File.Delete(arch); } catch { } }
+        }
+
+        static string Xml(string s) { return System.Security.SecurityElement.Escape(s ?? ""); }
+
+        void TareaBorrar()
+        {
+            Schtasks("/delete /tn \"" + TareaNombre + "\" /f");
+        }
+
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int ExtractIconEx(string f, int i, IntPtr[] g, IntPtr[] c, int n);
 
         // ---------- Tema ----------
@@ -438,6 +542,9 @@ namespace Xuca
 
         static readonly Color Celeste = Color.FromArgb(34, 211, 238);
 
+        // Para que los paneles propios de cada modulo (PC) usen los mismos colores
+        public bool Oscuro { get { return fv != null ? oscuroAhora : EsOscuro(); } }
+
         void AplicarTema()
         {
             if (fv == null) return;
@@ -451,6 +558,11 @@ namespace Xuca
             Color elegida = osc ? Color.FromArgb(14, 52, 60) : Color.FromArgb(207, 250, 254);
             fv.BackColor = fondo; fv.ForeColor = texto;
             arriba.BackColor = fondo; fila2.BackColor = fondo; medio.BackColor = fondo;
+            if (panelExtra != null)
+            {
+                panelExtra.BackColor = fondo;
+                foreach (Control c in panelExtra.Controls) c.Invalidate();
+            }
             caja.BackColor = tarj; tb.BackColor = tarj; tb.ForeColor = texto;
             estado.BackColor = fondo; estado.ForeColor = gris;
             chkInicio.ForeColor = texto; chkActivo.ForeColor = texto;
@@ -496,9 +608,35 @@ namespace Xuca
                 chkActivo.Checked = actual.Activo;
                 bReg.Text = T("Abrir registro", "Open log");
                 bLimp.Text = T("Limpiar", "Clear");
+                ActualizarPanelExtra();
                 LlenarTexto();
             }
             ActualizarEstado();
+        }
+
+        Modulo panelExtraDe;
+
+        // Pide el panel propio del modulo elegido (sensores de PC, etc.) solo cuando cambio de modulo:
+        // asi no se reconstruye (y pierde sus timers) cada vez que se actualizan los textos.
+        void ActualizarPanelExtra()
+        {
+            if (panelExtraDe == actual) return;
+            panelExtraDe = actual;
+            // El panel anterior se libera de verdad (Clear solo lo saca: su timer seguia andando para siempre)
+            List<Control> viejos = new List<Control>();
+            foreach (Control c in panelExtra.Controls) viejos.Add(c);
+            panelExtra.Controls.Clear();
+            foreach (Control c in viejos) c.Dispose();
+            Control ex = actual.PanelExtra();
+            if (ex != null)
+            {
+                int h = ex.Height > 0 ? ex.Height : 140;
+                ex.Dock = DockStyle.Fill;
+                panelExtra.Controls.Add(ex);
+                panelExtra.Height = h;
+                panelExtra.Visible = true;
+            }
+            else { panelExtra.Visible = false; panelExtra.Height = 0; }
         }
 
         void ActualizarEstado()
@@ -567,7 +705,7 @@ namespace Xuca
             fv.Icon = icono;
             // Tamaños pensados para 100 %: se agrandan con la escala de Windows (125 %, 150 %...)
             float k = fv.DeviceDpi / 96f;
-            fv.Size = new Size((int)(940 * k), (int)(600 * k));
+            fv.Size = new Size((int)(1000 * k), (int)(720 * k));
             fv.MinimumSize = new Size((int)(600 * k), (int)(340 * k));
             fv.StartPosition = FormStartPosition.CenterScreen;
             fv.Font = new Font("Segoe UI", 9.5f);
@@ -581,12 +719,17 @@ namespace Xuca
             chkInicio = new CheckBox();
             chkInicio.AutoSize = true;
             chkInicio.Margin = new Padding(0, 5, 14, 0);
-            chkInicio.Checked = File.Exists(InicioLnk);
+            chkInicio.Checked = TareaExiste();
             chkInicio.CheckedChanged += delegate
             {
-                if (chkInicio.Checked) { try { Acceso(InicioLnk, "/inicio"); } catch { } }
-                else { try { File.Delete(InicioLnk); } catch { } }
-                if (chkInicio.Checked != File.Exists(InicioLnk)) chkInicio.Checked = File.Exists(InicioLnk);
+                bool quiere = chkInicio.Checked;
+                if (quiere) { try { TareaCrear(); } catch { } }
+                else { try { TareaBorrar(); } catch { } }
+                if (quiere != TareaExiste())
+                {
+                    if (quiere) MessageBox.Show(T("No se pudo activar el inicio con Windows:\n", "Could not enable start with Windows:\n") + UltimoError, Nombre);
+                    chkInicio.Checked = !quiere;
+                }
             };
             arriba.Controls.Add(chkInicio);
 
@@ -675,7 +818,13 @@ namespace Xuca
             estado.Padding = new Padding((int)(12 * k), 0, 0, (int)(4 * k));
             estado.TextAlign = ContentAlignment.MiddleLeft;
 
+            panelExtra = new Panel();
+            panelExtra.Dock = DockStyle.Top;
+            panelExtra.Height = 0;
+            panelExtra.Visible = false;
+
             fv.Controls.Add(medio);
+            fv.Controls.Add(panelExtra);
             fv.Controls.Add(estado);
             fv.Controls.Add(fila2);
             fv.Controls.Add(arriba);
@@ -702,7 +851,7 @@ namespace Xuca
             Form f = fv;
             if (f == null) return;
             timerTema.Stop();
-            fv = null; tb = null; estado = null; chkInicio = null; chkActivo = null; botones.Clear(); pestanas.Clear();
+            fv = null; tb = null; estado = null; panelExtra = null; panelExtraDe = null; chkInicio = null; chkActivo = null; botones.Clear(); pestanas.Clear();
             f.Hide();
             Ui.BeginInvoke((MethodInvoker)delegate { f.Dispose(); Recortar(); });
         }
@@ -724,20 +873,86 @@ namespace Xuca
             catch { }
         }
 
+        // Si algo se rompe antes de mostrar la ventana (o en cualquier momento), en vez de cerrarse sin avisar
+        // nada, deja un registro en Documentos\Xuca Monitor\crash.txt y muestra el error.
+        static void GuardarCrash(object ex)
+        {
+            string msg = ex == null ? "(error desconocido)" : ex.ToString();
+            try
+            {
+                string carpeta = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Xuca Monitor");
+                Directory.CreateDirectory(carpeta);
+                File.AppendAllText(Path.Combine(carpeta, "crash.txt"), DateTime.Now + "\r\n" + msg + "\r\n\r\n");
+            }
+            catch { }
+            try
+            {
+                MessageBox.Show(T("Xuca Monitor tuvo un error:\r\n\r\n", "Xuca Monitor had an error:\r\n\r\n") + msg +
+                    T("\r\n\r\nQuedó guardado en Documentos\\Xuca Monitor\\crash.txt", "\r\n\r\nIt was saved in Documents\\Xuca Monitor\\crash.txt"),
+                    "Xuca Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch { }
+        }
+
+        // Las dll de los sensores (LibreHardwareMonitor y las que usa) van ADENTRO del .exe (compilar.bat las mete
+        // como recursos "lib.Nombre.dll"): asi el .exe anda solo, se puede mover a cualquier carpeta y el
+        // actualizador baja un unico archivo. .NET no las encuentra por su cuenta, entonces cuando pide una se la
+        // damos desde adentro del .exe (o, si no estuviera, desde una carpeta "lib" al lado).
+        static readonly Dictionary<string, Assembly> cargadas = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
+
+        static Assembly ResolverDeLib(object s, ResolveEventArgs e)
+        {
+            string corto;
+            try { corto = new AssemblyName(e.Name).Name; } catch { return null; }
+            lock (cargadas)
+            {
+                Assembly a;
+                if (cargadas.TryGetValue(corto, out a)) return a;
+                try
+                {
+                    using (Stream st = typeof(XucaMonitor).Assembly.GetManifestResourceStream("lib." + corto + ".dll"))
+                    {
+                        if (st != null)
+                        {
+                            byte[] b = new byte[st.Length];
+                            int leido = 0;
+                            while (leido < b.Length) { int n = st.Read(b, leido, b.Length - leido); if (n <= 0) break; leido += n; }
+                            a = Assembly.Load(b);
+                        }
+                    }
+                    if (a == null)
+                    {
+                        string ruta = Path.Combine(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lib"), corto + ".dll");
+                        if (File.Exists(ruta)) a = Assembly.LoadFrom(ruta);
+                    }
+                }
+                catch { a = null; }
+                if (a != null) cargadas[corto] = a;
+                return a;
+            }
+        }
+
         [STAThread]
         static void Main(string[] args)
         {
-            bool oculto = false;
-            bool actualizado = false;
-            foreach (string a in args)
+            AppDomain.CurrentDomain.AssemblyResolve += ResolverDeLib;
+            AppDomain.CurrentDomain.UnhandledException += delegate (object s, UnhandledExceptionEventArgs e) { GuardarCrash(e.ExceptionObject); };
+            Application.ThreadException += delegate (object s, ThreadExceptionEventArgs e) { GuardarCrash(e.Exception); };
+            try
             {
-                if (a.Equals("/inicio", StringComparison.OrdinalIgnoreCase)) oculto = true;
-                if (a.Equals("/actualizado", StringComparison.OrdinalIgnoreCase)) actualizado = true;
+                bool oculto = false;
+                bool actualizado = false;
+                foreach (string a in args)
+                {
+                    if (a.Equals("/inicio", StringComparison.OrdinalIgnoreCase)) oculto = true;
+                    if (a.Equals("/actualizado", StringComparison.OrdinalIgnoreCase)) actualizado = true;
+                }
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                XucaMonitor app = new XucaMonitor();
+                if (app.Iniciar(oculto, actualizado)) Application.Run(app);
             }
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            XucaMonitor app = new XucaMonitor();
-            if (app.Iniciar(oculto, actualizado)) Application.Run(app);
+            catch (Exception ex) { GuardarCrash(ex); }
         }
     }
 }
