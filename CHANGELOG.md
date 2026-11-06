@@ -25,8 +25,12 @@ Todo lo que cambió en cada versión de **Xuca Monitor**. La más nueva va arrib
   - **Seguro con anti-cheats**: no inyecta nada en el juego. Los FPS salen de los eventos de Windows (ETW, DXGI y D3D9), como PresentMon, y el texto va en una ventana transparente por la que pasan los clics. Se ve con el juego en pantalla completa sin bordes o en ventana, no en pantalla completa exclusiva.
   - **Capturable con OBS**: es una ventana aparte llamada "Xuca Overlay", así que se agrega como fuente de **Captura de ventana**. Destildando "Ocultarlo cuando el juego no está al frente" se queda visible mientras el juego esté abierto, aunque estés mirando OBS.
   - **Sin gasto cuando no jugás**: sin un juego de la lista abierto no hay sesión ETW ni lectura de sensores, solo un chequeo de procesos por segundo.
+  - **Reborde del texto**: negro por defecto y de 0 a 6 px, con color a elección, para que se lea sobre cualquier fondo.
+  - **Promedio de FPS** (`{fps.avg}`) y **0.1 % low** (`{low01}`), y la plantilla por defecto ahora trae colores, el nombre de la CPU y de la GPU y el promedio. Quien tenía la plantilla vieja sin tocar pasa a la nueva solo.
+  - Modelo nuevo **Comparativa (videos)**: nombres de los componentes, FPS grandes, promedio, 1 % y 0.1 % low, y consumo de GPU y CPU.
 
 ### Cambios
+- Arreglado: el overlay mostraba **FPS de más** (por ejemplo 5000 jugando a 1000) porque los tiempos de los eventos de Windows tienen otro origen de reloj que el programa. Ahora FPS, 1 % low, frametime y gráfico se miden contra el último cuadro recibido. También se cuenta una sola swapchain, para no sumar de más si el juego o un overlay presentan en varias.
 - **Rendimiento**: se sacó el aviso "Placa de video al máximo". La GPU al 100 % jugando es lo normal (no hay cuello de botella) y el aviso parecía un problema sin serlo. Siguen los avisos de bajones reales: procesador, RAM, disco, tirones y pérdida de foco.
 - La app ahora **pide permisos de administrador** al abrir (los sensores lo necesitan).
 - "Iniciar con Windows" usa una tarea programada (los accesos directos no se elevan solos). Además arranca aunque la notebook esté a batería y no se cierra a las 72 horas (dos trampas de las tareas que arma Windows por defecto).

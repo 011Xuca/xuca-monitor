@@ -38,6 +38,7 @@ namespace Xuca
             new OvVar("fps.min", "FPS mínimo de la sesión", "Session minimum FPS", "0"),
             new OvVar("fps.max", "FPS máximo de la sesión", "Session maximum FPS", "0"),
             new OvVar("low1", "1% low (los peores cuadros, en FPS)", "1% low (worst frames, in FPS)", "0"),
+            new OvVar("low01", "0.1% low (los peores cuadros, en FPS)", "0.1% low (worst frames, in FPS)", "0"),
             new OvVar("ft", "Frametime (ms)", "Frametime (ms)", "0.0"),
             new OvVar("proc", "Nombre del proceso del juego", "Game process name", ""),
             new OvVar("time", "Hora actual", "Current time", ""),
@@ -74,23 +75,32 @@ namespace Xuca
         }
 
         public const string Defecto =
-            "<c=FFC83D>{gpu.name}</c>\n" +
-            "<b><s=150>{fps!<60,30}</s></b> FPS   1% low {low1!<60,30}\n" +
+            "<c=76B900>{gpu.name}</c>\n" +
+            "<c=FF6B6B>{cpu.name}</c>\n" +
+            "<b><s=150>{fps!<60,30}</s></b> FPS   <c=8AB4FF>avg</c> {fps.avg}   <c=FFC83D>1% low</c> {low1!<60,30}\n" +
             "Frametime {ft:0.0} ms\n" +
             "{graph:240x40}\n" +
-            "GPU  {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.clock} MHz  {gpu.power} W\n" +
-            "VRAM {gpu.vram} / {gpu.vramtotal} MB\n" +
-            "CPU  {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.clock} MHz\n" +
-            "RAM  {ram.used} / {ram.total} GB";
+            "<c=76B900>GPU </c> {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.clock} MHz  {gpu.power} W\n" +
+            "<c=76B900>VRAM</c> {gpu.vram} / {gpu.vramtotal} MB\n" +
+            "<c=FF6B6B>CPU </c> {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.clock} MHz\n" +
+            "<c=B794F6>RAM </c> {ram.used} / {ram.total} GB";
 
-        public static readonly string[] PresetNombresEs = { "Completo", "Estilo Afterburner", "Solo FPS", "Mínimo" };
-        public static readonly string[] PresetNombresEn = { "Full", "Afterburner style", "FPS only", "Minimal" };
+        // Plantillas por defecto de versiones anteriores: si el usuario guardo una de estas sin tocarla, se pasa a la nueva
+        static readonly string[] Viejas = {
+            "<c=FFC83D>{gpu.name}</c>\n<b><s=150>{fps!<60,30}</s></b> FPS   1% low {low1!<60,30}\nFrametime {ft:0.0} ms\n{graph:240x40}\nGPU  {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.clock} MHz  {gpu.power} W\nVRAM {gpu.vram} / {gpu.vramtotal} MB\nCPU  {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.clock} MHz\nRAM  {ram.used} / {ram.total} GB",
+            "<c=FFC83D>{gpu.name}</c>\n<b><s=150>{fps!<60,30}</s></b> FPS   avg {fps.avg}   1% low {low1!<60,30}\nFrametime {ft:0.0} ms\n{graph:240x40}\nGPU  {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.clock} MHz  {gpu.power} W\nVRAM {gpu.vram} / {gpu.vramtotal} MB\nCPU  {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.clock} MHz\nRAM  {ram.used} / {ram.total} GB"
+        };
+        public static string Migrar(string p) { return Array.IndexOf(Viejas, p.Replace("\r\n", "\n")) >= 0 ? Defecto : p; }
+
+        public static readonly string[] PresetNombresEs = { "Completo", "Estilo Afterburner", "Solo FPS", "Mínimo", "Comparativa (videos)" };
+        public static readonly string[] PresetNombresEn = { "Full", "Afterburner style", "FPS only", "Minimal", "Comparison (videos)" };
         public static readonly string[] Presets = new string[]
         {
             Defecto,
             "<c=FFC83D>{gpu.name}</c>\nGPU usage    {gpu.load}%\nGPU temp     {gpu.temp}°C\nGPU clock    {gpu.clock} MHz\nMemory usage {gpu.vram} MB\nCPU usage    {cpu.load}%\nCPU temp     {cpu.temp}°C\nRAM usage    {ram.used:0.0} GB\nFramerate    {fps} FPS\nFrametime    {ft:0.0} ms\n{graph:260x40}",
             "<b><s=180>{fps!<60,30}</s></b> FPS",
-            "FPS {fps}   1% {low1}\nGPU {gpu.load}%  {gpu.temp}°C"
+            "FPS {fps}   avg {fps.avg}   1% {low1}\nGPU {gpu.load}%  {gpu.temp}°C",
+            "<b><c=76B900>{gpu.name}</c></b>\n<b><c=FF6B6B>{cpu.name}</c></b>\n<b><s=200>{fps!<60,30}</s></b> FPS\n<c=8AB4FF>AVG</c> {fps.avg}   <c=FFC83D>1% LOW</c> {low1!<60,30}   <c=FFC83D>0.1% LOW</c> {low01!<60,30}\nFrametime {ft:0.0} ms\n{graph:260x40}\n<c=76B900>GPU </c> {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.power} W\n<c=76B900>VRAM</c> {gpu.vram} / {gpu.vramtotal} MB\n<c=FF6B6B>CPU </c> {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.power} W\n<c=B794F6>RAM </c> {ram.used} / {ram.total} GB"
         };
     }
 
@@ -111,6 +121,8 @@ namespace Xuca
         public int X = 12, Y = 12;
         public string Tecla = "F10";        // "" = sin atajo
         public string Plantilla = OvCat.Defecto;
+        public int Borde = 1;               // reborde del texto en px, 0..6 (0 = sin reborde)
+        public int ColorBorde = Color.FromArgb(0, 0, 0).ToArgb();
 
         public static OvCfg Cargar(string arch)
         {
@@ -144,7 +156,9 @@ namespace Xuca
                     case "x": if (int.TryParse(v.Trim(), out n)) X = Math.Max(0, Math.Min(4000, n)); break;
                     case "y": if (int.TryParse(v.Trim(), out n)) Y = Math.Max(0, Math.Min(4000, n)); break;
                     case "tecla": Tecla = v.Trim(); break;
-                    case "plantilla": Plantilla = v.Replace('↵', '\n'); break;
+                    case "plantilla": Plantilla = OvCat.Migrar(v.Replace('↵', '\n')); break;
+                    case "borde": if (int.TryParse(v.Trim(), out n)) Borde = Math.Max(0, Math.Min(6, n)); break;
+                    case "colorborde": if (int.TryParse(v.Trim(), out n)) ColorBorde = n; break;
                 }
             }
         }
@@ -165,6 +179,8 @@ namespace Xuca
             l.Add("esquina=" + Esquina);
             l.Add("x=" + X);
             l.Add("y=" + Y);
+            l.Add("borde=" + Borde);
+            l.Add("colorborde=" + ColorBorde);
             l.Add("tecla=" + Tecla);
             l.Add("plantilla=" + Plantilla.Replace("\r\n", "\n").Replace('\n', '↵'));
             return l.ToArray();
@@ -223,7 +239,8 @@ namespace Xuca
 
         readonly object lk = new object();
         readonly HashSet<uint> pids = new HashSet<uint>();
-        readonly Dictionary<uint, List<double>> frames = new Dictionary<uint, List<double>>();
+        // pid -> swapchain -> marcas de tiempo; separar por swapchain evita contar de mas cuando el juego o un overlay presentan en varias
+        readonly Dictionary<uint, Dictionary<ulong, List<double>>> frames = new Dictionary<uint, Dictionary<ulong, List<double>>>();
         ulong sesion, traza;
         Thread hilo;
         RecCb cb;
@@ -331,11 +348,17 @@ namespace Xuca
                 if (!((id == 42 && g == Dxgi) || (id == 1 && g == D3d9))) return;
                 uint pid = *(uint*)(p + 12);
                 double ms = (*(long*)(p + 16)) * aMs;
+                // el payload empieza con el puntero a la swapchain (UserData en el desplazamiento 96 de EVENT_RECORD de 64 bits)
+                ulong sc = 0;
+                if (*(ushort*)(p + 86) >= 8) sc = *(ulong*)(*(IntPtr*)(p + 96));
                 lock (lk)
                 {
                     if (!pids.Contains(pid)) return;
+                    ultLlegada = Stopwatch.GetTimestamp() * aMs;
+                    Dictionary<ulong, List<double>> porSc;
+                    if (!frames.TryGetValue(pid, out porSc)) { porSc = new Dictionary<ulong, List<double>>(); frames[pid] = porSc; }
                     List<double> l;
-                    if (!frames.TryGetValue(pid, out l)) { l = new List<double>(); frames[pid] = l; }
+                    if (!porSc.TryGetValue(sc, out l)) { l = new List<double>(); porSc[sc] = l; }
                     l.Add(ms);
                     if (l[0] < ms - 6000)
                     {
@@ -349,25 +372,35 @@ namespace Xuca
         }
 
         // Llena fps, low1 y ft (y el grafico) en d. Si todavia no llego ningun cuadro, no pone nada.
+        double ultLlegada;   // ultLlegada: cuando llego el ultimo evento (reloj del programa), para detectar pausa
+
         public void Medir(OvDatos d)
         {
             double ahora = Stopwatch.GetTimestamp() * aMs;
             double[] t = null;
             lock (lk)
             {
-                double mejor = -1;
-                foreach (List<double> l in frames.Values)
-                    if (l.Count > 2 && l[l.Count - 1] > mejor) { mejor = l[l.Count - 1]; t = l.ToArray(); }
+                int mejor = 0;   // la swapchain con mas cuadros en el ultimo segundo: estable, no salta entre varias
+                foreach (Dictionary<ulong, List<double>> porSc in frames.Values)
+                    foreach (List<double> l in porSc.Values)
+                    {
+                        if (l.Count <= 2) continue;
+                        int c = 0;
+                        for (int i = l.Count - 1; i >= 0 && l[i] > l[l.Count - 1] - 1000; i--) c++;
+                        if (t == null || c > mejor) { mejor = c; t = l.ToArray(); }
+                    }
             }
             if (t == null) return;
             d.HayFps = true;
-            if (ahora - t[t.Length - 1] > 2000) { d.N["fps"] = 0; d.N["ft"] = 0; d.N["low1"] = 0; return; }   // el juego esta en pausa o minimizado
+            // Los tiempos de los eventos pueden venir con otro origen que Stopwatch: todo se mide contra el ultimo evento, no contra "ahora"
+            if (ahora - ultLlegada > 2000) { d.N["fps"] = 0; d.N["ft"] = 0; d.N["low1"] = 0; d.N["low01"] = 0; return; }   // el juego esta en pausa o minimizado
+            double fin = t[t.Length - 1];
             int n1 = 0;
-            for (int i = t.Length - 1; i >= 0 && t[i] > ahora - 1000; i--) n1++;
+            for (int i = t.Length - 1; i >= 0 && t[i] > fin - 1000; i--) n1++;
             d.N["fps"] = n1;
             d.N["ft"] = t[t.Length - 1] - t[t.Length - 2];
             List<double> dt = new List<double>();
-            for (int i = t.Length - 1; i > 0 && t[i] > ahora - 5000; i--) dt.Add(t[i] - t[i - 1]);
+            for (int i = t.Length - 1; i > 0 && t[i] > fin - 5000; i--) dt.Add(t[i] - t[i - 1]);
             if (dt.Count > 0)
             {
                 dt.Sort();
@@ -376,6 +409,10 @@ namespace Xuca
                 double s = 0;
                 for (int i = 0; i < k; i++) s += dt[i];
                 d.N["low1"] = s > 0 ? 1000.0 / (s / k) : 0;
+                int k2 = Math.Max(1, dt.Count / 1000);   // 0.1 %: sobre 5 s son pocos cuadros, por eso salta mas que el 1 %
+                double s2 = 0;
+                for (int i = 0; i < k2; i++) s2 += dt[i];
+                d.N["low01"] = s2 > 0 ? 1000.0 / (s2 / k2) : 0;
             }
             int m = Math.Min(120, t.Length - 1);
             float[] g = new float[m];
@@ -630,7 +667,7 @@ namespace Xuca
                                 anchoTotal = Math.Max(anchoTotal, ancho[li]);
                             }
 
-                    int pad = 6;
+                    int pad = 6 + cfg.Borde;   // el reborde no se corta en los bordes
                     float total = 0;
                     foreach (float h in alto) total += h;
                     int W = (int)Math.Ceiling(anchoTotal) + pad * 2, H = (int)Math.Ceiling(total) + pad * 2;
@@ -655,8 +692,24 @@ namespace Xuca
                                 if (r.Graf) DibujarGrafico(gd, d.Graf, r.C, aT, x, y + (alto[li] - hRun[li][ri]), aRun[li][ri], hRun[li][ri]);
                                 else
                                 {
+                                    Font fr = Fuente(fuentes, cfg, r.Esc, r.B);
+                                    float ty = y + (alto[li] - hRun[li][ri]);
                                     using (SolidBrush br = new SolidBrush(Color.FromArgb(aT, r.C)))
-                                        gd.DrawString(r.T, Fuente(fuentes, cfg, r.Esc, r.B), br, x, y + (alto[li] - hRun[li][ri]), sf);
+                                    {
+                                        if (cfg.Borde <= 0) gd.DrawString(r.T, fr, br, x, ty, sf);
+                                        else
+                                        {
+                                            // Reborde: el contorno del texto trazado por debajo y el relleno encima (shortcut: con opacidad < 100 % el trazo se transparenta por el relleno)
+                                            using (GraphicsPath gp = new GraphicsPath())
+                                            using (Pen pen = new Pen(Color.FromArgb(aT, Color.FromArgb(cfg.ColorBorde)), cfg.Borde * 2))
+                                            {
+                                                pen.LineJoin = LineJoin.Round;
+                                                gp.AddString(r.T, fr.FontFamily, (int)fr.Style, fr.SizeInPoints * gd.DpiY / 72f, new PointF(x, ty), sf);
+                                                gd.DrawPath(pen, gp);
+                                                gd.FillPath(br, gp);
+                                            }
+                                        }
+                                    }
                                 }
                                 x += aRun[li][ri];
                             }
@@ -882,7 +935,7 @@ namespace Xuca
                 // Vista previa con datos de ejemplo
                 OvDatos d = new OvDatos();
                 d.HayFps = true;
-                d.N["fps"] = 144; d.N["fps.avg"] = 141; d.N["fps.min"] = 96; d.N["fps.max"] = 188; d.N["low1"] = 118; d.N["ft"] = 6.9;
+                d.N["fps"] = 144; d.N["fps.avg"] = 141; d.N["fps.min"] = 96; d.N["fps.max"] = 188; d.N["low1"] = 118; d.N["low01"] = 92; d.N["ft"] = 6.9;
                 d.S["proc"] = cfg.Procs.Count > 0 ? cfg.Procs[0] : "Juego"; d.S["time"] = DateTime.Now.ToString("HH:mm");
                 d.S["cpu.name"] = "AMD Ryzen 7 5800X3D"; d.N["cpu.load"] = 38; d.N["cpu.temp"] = 61; d.N["cpu.power"] = 72; d.N["cpu.clock"] = 4450; d.N["cpu.volt"] = 1.25;
                 d.S["gpu.name"] = "NVIDIA GeForce RTX 4070"; d.N["gpu.load"] = 97; d.N["gpu.temp"] = 66; d.N["gpu.hot"] = 78; d.N["gpu.memtemp"] = 70;
@@ -964,9 +1017,9 @@ namespace Xuca
         ListBox lista;
         ComboBox cmbProc, cmbEsq, cmbTecla, cmbVar, cmbPre;
         TextBox txt;
-        Button bFuente, bTexto, bFondo;
+        Button bFuente, bTexto, bFondo, bBorde;
         TrackBar trTexto, trFondo;
-        NumericUpDown nX, nY;
+        NumericUpDown nX, nY, nBorde;
         System.Windows.Forms.Timer debounce;
 
         public static void Mostrar()
@@ -1107,6 +1160,12 @@ namespace Xuca
             for (int i = 1; i <= 12; i++) cmbTecla.Items.Add("F" + i);
             cmbTecla.SelectedIndexChanged += Cambio; ge.Controls.Add(cmbTecla);
 
+            Label lb = new Label(); lb.AutoSize = true; lb.Text = T("Reborde (px)", "Outline (px)"); lb.Location = new Point(275, 168); ge.Controls.Add(lb);
+            nBorde = new NumericUpDown(); nBorde.Minimum = 0; nBorde.Maximum = 6; nBorde.SetBounds(355, 164, 45, 24); nBorde.ValueChanged += Cambio; ge.Controls.Add(nBorde);
+            bBorde = new Button(); bBorde.SetBounds(410, 163, 110, 26);
+            bBorde.Click += delegate { Color n; if (Elegir(c.ColorBorde, out n)) { c.ColorBorde = n.ToArgb(); Cambio(null, null); } };
+            ge.Controls.Add(bBorde);
+
             // Botones
             FlowLayoutPanel fb = new FlowLayoutPanel(); fb.AutoSize = true; fb.Margin = new Padding(0, 8, 0, 0); f.Controls.Add(fb);
             CheckBox prev = new CheckBox(); prev.Appearance = Appearance.Button; prev.AutoSize = true; prev.Text = T("Vista previa", "Preview");
@@ -1187,6 +1246,7 @@ namespace Xuca
             trFondo.Value = Math.Max(0, Math.Min(100, c.OpFondo));
             cmbEsq.SelectedIndex = Math.Max(0, Array.IndexOf(new string[] { "tl", "tr", "bl", "br" }, c.Esquina));
             nX.Value = c.X; nY.Value = c.Y;
+            nBorde.Value = Math.Max(0, Math.Min(6, c.Borde));
             int t = 0;
             if (c.Tecla.Length > 1 && c.Tecla[0] == 'F') int.TryParse(c.Tecla.Substring(1), out t);
             cmbTecla.SelectedIndex = t >= 1 && t <= 12 ? t : 0;
@@ -1203,6 +1263,9 @@ namespace Xuca
             bTexto.ForeColor = bTexto.BackColor.GetBrightness() > 0.5 ? Color.Black : Color.White;
             bFondo.BackColor = Color.FromArgb(255, Color.FromArgb(c.ColorFondo));
             bFondo.ForeColor = bFondo.BackColor.GetBrightness() > 0.5 ? Color.Black : Color.White;
+            bBorde.Text = T("Color del reborde", "Outline color");
+            bBorde.BackColor = Color.FromArgb(255, Color.FromArgb(c.ColorBorde));
+            bBorde.ForeColor = bBorde.BackColor.GetBrightness() > 0.5 ? Color.Black : Color.White;
         }
 
         // Controles -> ajustes (y se aplica y guarda al instante)
@@ -1219,6 +1282,7 @@ namespace Xuca
             c.OpFondo = trFondo.Value;
             c.Esquina = new string[] { "tl", "tr", "bl", "br" }[Math.Max(0, cmbEsq.SelectedIndex)];
             c.X = (int)nX.Value; c.Y = (int)nY.Value;
+            c.Borde = (int)nBorde.Value;
             c.Tecla = cmbTecla.SelectedIndex > 0 ? "F" + cmbTecla.SelectedIndex : "";
             Textos();
             OvMgr.Aplicar(c, true);

@@ -122,7 +122,7 @@ namespace Xuca
         readonly Dictionary<string, DateTime> roboAvisado = new Dictionary<string, DateTime>();
 
         // Ventanas que abris vos: el Alt+Tab, el menu inicio, la busqueda, el administrador de tareas
-        static readonly Regex DeVos = new Regex("^(startmenuexperiencehost|searchhost|searchapp|searchui|shellexperiencehost|taskmgr|xucamonitor)$", RegexOptions.IgnoreCase);
+        static readonly Regex DeVos = new Regex("^(startmenuexperiencehost|searchhost|searchapp|searchui|shellexperiencehost|taskmgr|xucamonitor|snippingtool|screenclippinghost|screensketch)$", RegexOptions.IgnoreCase);
         static readonly Regex ClaseSwitch = new Regex("^(MultitaskingViewFrame|XamlExplorerHostIslandWindow|ForegroundStaging|TaskSwitcherWnd|Shell_TrayWnd|NotifyIconOverflowWindow|TopLevelWindowForOverflowXamlIsland)$");
 
         void VueltaFoco()
