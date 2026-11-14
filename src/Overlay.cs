@@ -581,6 +581,7 @@ namespace Xuca
     internal sealed class OvForm : Form
     {
         [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr h, IntPtr hdcDst, ref PT dst, ref SZ size, IntPtr hdcSrc, ref PT src, int key, ref BLEND bf, int flags);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr h);
         [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr h, IntPtr dc);
         [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
@@ -764,6 +765,8 @@ namespace Xuca
                 PT src = new PT();
                 BLEND bf = new BLEND(); bf.Op = 0; bf.Flags = 0; bf.Alpha = 255; bf.Format = 1;   // AC_SRC_OVER, AC_SRC_ALPHA
                 UpdateLayeredWindow(Handle, dcPantalla, ref dst, ref sz, dcMem, ref src, 0, ref bf, 2);
+                // Reafirma TOPMOST en cada refresco: un juego en ventana sin bordes / pantalla completa optimizada puede pasar por encima
+                SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10 | 0x40);   // NOSIZE|NOMOVE|NOACTIVATE|SHOWWINDOW
             }
             finally
             {
@@ -1019,7 +1022,7 @@ namespace Xuca
         TextBox txt;
         Button bFuente, bTexto, bFondo, bBorde;
         TrackBar trTexto, trFondo;
-        NumericUpDown nX, nY, nBorde;
+        NumericUpDown nX, nY, nBorde, nTam;
         System.Windows.Forms.Timer debounce;
 
         public static void Mostrar()
@@ -1123,12 +1126,15 @@ namespace Xuca
                     try { fd.Font = new Font(c.Fuente, c.Tam, c.Negrita ? FontStyle.Bold : FontStyle.Regular); } catch { }
                     if (fd.ShowDialog(this) == DialogResult.OK)
                     {
-                        c.Fuente = fd.Font.Name; c.Tam = fd.Font.SizeInPoints;
+                        c.Fuente = fd.Font.Name;
+                        nTam.Value = Math.Max(6, Math.Min(72, (decimal)Math.Round(fd.Font.SizeInPoints)));   // Cambio() lee el tamano de aqui
                         Cambio(null, null);
                     }
                 }
             };
             ge.Controls.Add(bFuente);
+            nTam = new NumericUpDown(); nTam.Minimum = 6; nTam.Maximum = 72; nTam.SetBounds(450, 24, 70, 24);
+            nTam.ValueChanged += Cambio; ge.Controls.Add(nTam);
             chkNegrita = new CheckBox(); chkNegrita.AutoSize = true; chkNegrita.Text = T("Todo en negrita", "All bold"); chkNegrita.Location = new Point(270, 26);
             chkNegrita.CheckedChanged += Cambio; ge.Controls.Add(chkNegrita);
             bTexto = new Button(); bTexto.SetBounds(10, 54, 250, 26);
@@ -1246,6 +1252,7 @@ namespace Xuca
             trFondo.Value = Math.Max(0, Math.Min(100, c.OpFondo));
             cmbEsq.SelectedIndex = Math.Max(0, Array.IndexOf(new string[] { "tl", "tr", "bl", "br" }, c.Esquina));
             nX.Value = c.X; nY.Value = c.Y;
+            nTam.Value = Math.Max(6, Math.Min(72, (decimal)Math.Round(c.Tam)));
             nBorde.Value = Math.Max(0, Math.Min(6, c.Borde));
             int t = 0;
             if (c.Tecla.Length > 1 && c.Tecla[0] == 'F') int.TryParse(c.Tecla.Substring(1), out t);
@@ -1282,6 +1289,7 @@ namespace Xuca
             c.OpFondo = trFondo.Value;
             c.Esquina = new string[] { "tl", "tr", "bl", "br" }[Math.Max(0, cmbEsq.SelectedIndex)];
             c.X = (int)nX.Value; c.Y = (int)nY.Value;
+            c.Tam = (float)nTam.Value;
             c.Borde = (int)nBorde.Value;
             c.Tecla = cmbTecla.SelectedIndex > 0 ? "F" + cmbTecla.SelectedIndex : "";
             Textos();
