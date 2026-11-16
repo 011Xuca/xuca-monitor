@@ -23,7 +23,8 @@ namespace Xuca
 
         class Zona { public Rectangle R; public MethodInvoker Hacer; }
 
-        Color cFondo, cTarj, cLinea, cTexto, cGris, cAcento, cElegida, cVerde, cAmarillo, cRojo, cVioleta;
+        // cMarca (verde de la app) = controles y seleccion; cAcento (cian) = color de datos de barras y graficos
+        Color cFondo, cTarj, cLinea, cTexto, cGris, cAcento, cMarca, cElegida, cVerde, cAmarillo, cRojo, cVioleta;
 
         public PcVista(MonitorPC pc)
         {
@@ -66,7 +67,8 @@ namespace Xuca
             cTexto = osc ? Color.White : Color.FromArgb(17, 24, 39);
             cGris = osc ? Color.FromArgb(150, 160, 175) : Color.FromArgb(107, 114, 128);
             cAcento = osc ? Color.FromArgb(34, 211, 238) : Color.FromArgb(8, 145, 178);
-            cElegida = osc ? Color.FromArgb(14, 52, 60) : Color.FromArgb(207, 250, 254);
+            cMarca = osc ? Color.FromArgb(74, 222, 128) : Color.FromArgb(21, 128, 61);
+            cElegida = osc ? Color.FromArgb(22, 50, 35) : Color.FromArgb(220, 252, 231);
             cVerde = osc ? Color.FromArgb(74, 222, 128) : Color.FromArgb(22, 163, 74);
             cAmarillo = osc ? Color.FromArgb(250, 204, 21) : Color.FromArgb(180, 120, 0);
             cRojo = osc ? Color.FromArgb(248, 113, 113) : Color.FromArgb(220, 38, 38);
@@ -278,7 +280,7 @@ namespace Xuca
                 int tw = Ancho(t, fNegrita) + S(22);
                 Rectangle r = new Rectangle(xx, y, tw, h);
                 bool sel = i == pc.CatActual;
-                Caja(g, r, sel ? cElegida : cTarj, sel ? cAcento : cLinea, sel ? 2 : 1);
+                Caja(g, r, sel ? cElegida : cTarj, sel ? cMarca : cLinea, sel ? 2 : 1);
                 Tx(g, t, fNegrita, c.Activo ? cTexto : cGris, r, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 int ii = i;
                 Clic(r, delegate { pc.Seleccionar(ii); scroll = 0; if (pc.App != null) pc.App.Cambio(pc); });
@@ -291,10 +293,10 @@ namespace Xuca
             int cx = xx + S(10), cy = y;
             if (cx + cw > x + w) { cx = x; cy = y + h + S(6); }
             Rectangle cb = new Rectangle(cx, cy + (h - S(16)) / 2, S(16), S(16));
-            Caja(g, cb, a.Activo ? cAcento : cTarj, a.Activo ? cAcento : cGris, 1, S(3));
+            Caja(g, cb, a.Activo ? cMarca : cTarj, a.Activo ? cMarca : cGris, 1, S(3));
             if (a.Activo)
             {
-                using (Pen p = new Pen(TextoSobre(cAcento), Math.Max(2f, 2f * k)))
+                using (Pen p = new Pen(TextoSobre(cMarca), Math.Max(2f, 2f * k)))
                     g.DrawLines(p, new Point[] { new Point(cb.X + S(4), cb.Y + S(8)), new Point(cb.X + S(7), cb.Y + S(11)), new Point(cb.X + S(12), cb.Y + S(5)) });
             }
             Tx(g, ct, fNormal, cTexto, cx + S(22), cy + (h - fNormal.Height) / 2);
@@ -894,7 +896,7 @@ namespace Xuca
             if (datos.Count == 0) return y;
             string t = (verTodos ? "▾  " : "▸  ") + T("Todos los sensores", "All sensors") + " (" + datos.Count + ")";
             Rectangle rt = new Rectangle(x, y, Ancho(t, fNegrita) + S(12), fNegrita.Height + S(8));
-            Tx(g, t, fNegrita, cAcento, x + S(2), y + S(4));
+            Tx(g, t, fNegrita, cMarca, x + S(2), y + S(4));
             Clic(rt, delegate { verTodos = !verTodos; });
             y += rt.Height + S(2);
             if (!verTodos) return y;

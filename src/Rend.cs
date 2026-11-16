@@ -68,7 +68,7 @@ namespace Xuca
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
 
         // Programas en pantalla completa que no son juegos
-        static readonly Regex NoJuego = new Regex("^(explorer|chrome|msedge|firefox|opera|opera_gx|brave|vivaldi|vlc|mpc-hc64|mpc-hc|mpc-be64|potplayer|potplayermini64|wmplayer|applicationframehost|lockapp|searchhost|startmenuexperiencehost|shellexperiencehost|textinputhost|powerpnt|xucamonitor|obs64|discord|spotify|steamwebhelper|snippingtool|screenclippinghost|screensketch|snagit32|snagiteditor|sharex)$", RegexOptions.IgnoreCase);
+        static readonly Regex NoJuego = new Regex("^(explorer|chrome|msedge|firefox|opera|opera_gx|brave|vivaldi|vlc|mpc-hc64|mpc-hc|mpc-be64|potplayer|potplayermini64|wmplayer|applicationframehost|lockapp|searchhost|startmenuexperiencehost|shellexperiencehost|textinputhost|powerpnt|pulso|obs64|discord|spotify|steamwebhelper|snippingtool|screenclippinghost|screensketch|snagit32|snagiteditor|sharex)$", RegexOptions.IgnoreCase);
 
         static readonly int miPid = Process.GetCurrentProcess().Id;
         volatile int pidJuego;
@@ -122,7 +122,7 @@ namespace Xuca
         readonly Dictionary<string, DateTime> roboAvisado = new Dictionary<string, DateTime>();
 
         // Ventanas que abris vos: el Alt+Tab, el menu inicio, la busqueda, el administrador de tareas
-        static readonly Regex DeVos = new Regex("^(startmenuexperiencehost|searchhost|searchapp|searchui|shellexperiencehost|taskmgr|xucamonitor|snippingtool|screenclippinghost|screensketch)$", RegexOptions.IgnoreCase);
+        static readonly Regex DeVos = new Regex("^(startmenuexperiencehost|searchhost|searchapp|searchui|shellexperiencehost|taskmgr|pulso|snippingtool|screenclippinghost|screensketch)$", RegexOptions.IgnoreCase);
         static readonly Regex ClaseSwitch = new Regex("^(MultitaskingViewFrame|XamlExplorerHostIslandWindow|ForegroundStaging|TaskSwitcherWnd|Shell_TrayWnd|NotifyIconOverflowWindow|TopLevelWindowForOverflowXamlIsland)$");
 
         void VueltaFoco()

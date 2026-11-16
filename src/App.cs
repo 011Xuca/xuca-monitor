@@ -1,4 +1,4 @@
-// Xuca Monitor: vigila la red y los USB desde la bandeja (al lado del reloj).
+// Pulso: vigila la red, los USB, el rendimiento, los errores y el hardware desde la bandeja (al lado del reloj).
 // Cada parte (Red y USB) es un "modulo" que se puede prender o apagar; apagado no gasta nada.
 // La ventana solo existe mientras esta abierta: al cerrarla o minimizarla se destruye y se libera la memoria,
 // y lo detectado queda guardado en el historial.
@@ -16,12 +16,12 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyTitle("Xuca Monitor")]
-[assembly: AssemblyProduct("Xuca Monitor")]
+[assembly: AssemblyTitle("Pulso")]
+[assembly: AssemblyProduct("Pulso")]
 [assembly: AssemblyCompany("011Xuca")]
 [assembly: AssemblyCopyright("011Xuca")]
-[assembly: AssemblyVersion(Xuca.XucaMonitor.Version + ".0")]
-[assembly: AssemblyFileVersion(Xuca.XucaMonitor.Version + ".0")]
+[assembly: AssemblyVersion(Xuca.Pulso.Version + ".0")]
+[assembly: AssemblyFileVersion(Xuca.Pulso.Version + ".0")]
 
 namespace Xuca
 {
@@ -29,7 +29,7 @@ namespace Xuca
     public abstract class Modulo
     {
         public string Clave, PestEs, PestEn, TipEs, TipEn, NombreEs, NombreEn, RegistroArch, HistArch, ContEs, ContEn, VacioEs, VacioEn, ApagadoEs, ApagadoEn;
-        public XucaMonitor App;
+        public Pulso App;
         public bool Activo;
         public DateTime Desde = DateTime.Now;
 
@@ -113,6 +113,21 @@ namespace Xuca
             App.Cambio(this);
         }
 
+        // Para que otra parte de la app (el modo benchmark) deje un aviso en esta pestaña
+        internal void AgregarAviso(string texto, int suma) { Agregar(texto, suma); }
+
+        // La primera linea del ultimo aviso (su titulo), o null
+        internal string UltimoTitulo()
+        {
+            lock (Cerrojo)
+            {
+                if (Bloques.Count == 0) return null;
+                string t = Bloques[Bloques.Count - 1].Value;
+                int i = t.IndexOf('\n');
+                return (i >= 0 ? t.Substring(0, i) : t).Trim();
+            }
+        }
+
         // Aviso que se ve en la ventana pero no se guarda
         protected void Avisar(string texto) { App.Aviso(this, texto); }
 
@@ -149,14 +164,33 @@ namespace Xuca
         protected void EnUi(MethodInvoker m) { App.EnUi(m); }
     }
 
-    // ---------- La app ----------
-    public partial class XucaMonitor : ApplicationContext
+    // Pestaña que en este Windows no esta disponible: no vigila nada, solo explica por que
+    public class ModuloNoDisponible : Modulo
     {
-        public const string Nombre = "Xuca Monitor";
-        // Al sacar una version nueva: cambiar esto y subir el .exe a un Release de GitHub con el tag "v" + Version
-        public const string Version = "1.0.3";
+        readonly string queEs, queEn;
+        public ModuloNoDisponible(string clave, string pestana, string queEs, string queEn)
+        {
+            Clave = clave; PestEs = PestEn = TipEs = TipEn = NombreEs = NombreEn = pestana;
+            RegistroArch = "registro_" + clave + "_no_disponible.txt"; HistArch = "historial_" + clave + "_no_disponible.txt";
+            ContEs = "Avisos"; ContEn = "Alerts"; VacioEs = ApagadoEs = VacioEn = ApagadoEn = "";
+            this.queEs = queEs; this.queEn = queEn;
+        }
+        protected override void Empezar() { }
+        protected override void Terminar() { }
+        internal override string Texto() { return Pulso.SoloWin10(queEs, queEn); }
+    }
 
-        string Dir, Datos, CfgF, Exe, InicioLnk;
+    // ---------- La app ----------
+    public partial class Pulso : ApplicationContext
+    {
+        public const string Nombre = "Pulso";
+        // Lo unico que queda del nombre anterior (Xuca Monitor, hasta la 1.0.3): la carpeta de datos se muda sola a
+        // Documentos\Pulso y la tarea "Iniciar con Windows" se cambia por la nueva (ver CarpetaDatos y Iniciar).
+        const string NombreViejo = "Xuca Monitor";
+        // Al sacar una version nueva: cambiar esto y subir Pulso.exe a un Release de GitHub con el tag "v" + Version
+        public const string Version = "1.0.4";
+
+        string Dir, Datos, CfgF, Exe;
         readonly List<Modulo> modulos = new List<Modulo>();
         Modulo actual;
         string tema = "sistema";
@@ -186,6 +220,26 @@ namespace Xuca
 
         static string T(string es, string en) { return Modulo.T(es, en); }
 
+        // Version real de Windows. RtlGetVersion no depende del manifest (Environment.OSVersion si: sin la seccion de
+        // compatibilidad, Windows 10/11 se hace pasar por 8 y se apagaria todo lo de abajo).
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct OSVI { public int Size, Major, Minor, Build, Platform; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string Csd; }
+        [DllImport("ntdll.dll")] static extern int RtlGetVersion(ref OSVI v);
+        static Version LeerVersion()
+        {
+            try { OSVI v = new OSVI(); v.Size = Marshal.SizeOf(typeof(OSVI)); if (RtlGetVersion(ref v) == 0) return new Version(v.Major, v.Minor, v.Build); }
+            catch { }
+            return Environment.OSVersion.Version;
+        }
+        internal static readonly Version WinVer = LeerVersion();
+        // En 7, 8 y 8.1 Pulso anda recortado: sin pestaña PC (sensores con PawnIO) ni overlay de FPS / modo benchmark (ETW).
+        internal static readonly bool Win10 = WinVer.Major >= 10;
+        internal static string SoloWin10(string que_es, string que_en)
+        {
+            return T(que_es + ": solo para Windows 10 u 11. En tu Windows (" + WinVer.ToString(2) + ") no está disponible; el resto de Pulso anda igual.",
+                     que_en + ": Windows 10 or 11 only. On your Windows (" + WinVer.ToString(2) + ") it is not available; the rest of Pulso works the same.");
+        }
+
         // Aparte, sin inline: si falta una dll de "lib" el error de carga queda adentro de este metodo nomas.
         [MethodImpl(MethodImplOptions.NoInlining)]
         static Modulo CrearModuloPC()
@@ -198,8 +252,8 @@ namespace Xuca
         public bool Iniciar(bool oculto, bool actualizado)
         {
             bool creado;
-            mutex = new Mutex(true, "Local\\XucaMonitor", out creado);
-            evMostrar = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\XucaMonitor_Mostrar");
+            mutex = new Mutex(true, "Local\\Pulso", out creado);
+            evMostrar = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\Pulso_Mostrar");
             // Recien actualizada: la version vieja todavia se esta cerrando, se espera a que suelte el mutex
             if (!creado && actualizado)
             {
@@ -209,21 +263,11 @@ namespace Xuca
 
             Exe = Application.ExecutablePath;
             Dir = Path.GetDirectoryName(Exe);
-            // Registros, historial y ajustes van a Documentos\Xuca Monitor (asi el .exe puede estar en cualquier lado)
-            Datos = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), Nombre);
+            // Registros, historial y ajustes van a Documentos\Pulso (asi el .exe puede estar en cualquier lado).
+            // Se muda despues de tomar el mutex: ninguna otra copia puede estar escribiendo ahi.
+            Datos = carpetaDatos = CarpetaDatos(true);
             try { Directory.CreateDirectory(Datos); } catch { Datos = Dir; }
-            // Lo que haya quedado al lado del .exe (versiones anteriores) se mueve a la carpeta nueva
-            if (Datos != Dir)
-            {
-                foreach (string f in new string[] { "ajustes_monitores.txt", "registro_red.txt", "historial_red.txt", "registro_usb.txt", "historial_usb.txt" })
-                {
-                    string viejo = Path.Combine(Dir, f), nuevo = Path.Combine(Datos, f);
-                    try { if (File.Exists(viejo) && !File.Exists(nuevo)) File.Move(viejo, nuevo); } catch { }
-                }
-            }
             CfgF = Path.Combine(Datos, "ajustes_monitores.txt");
-            string inicio = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            InicioLnk = Path.Combine(inicio, Nombre + ".lnk");
 
             Dictionary<string, string> aj = LeerAjustes();
             string v;
@@ -256,7 +300,9 @@ namespace Xuca
             modulos.Add(new MonitorErrores());
             // Si falta alguna dll de la carpeta "lib" (sensores), que no se caiga toda la app: se guarda el error y
             // se sigue sin la pestaña PC.
-            Modulo pc = CrearModuloPC();
+            // En Windows 7/8/8.1 la pestaña queda, pero solo explica por que no esta (el driver PawnIO es para Windows 10 u 11)
+            Modulo pc = Win10 ? CrearModuloPC() : new ModuloNoDisponible("pc", "PC",
+                "La pestaña PC (temperaturas, consumo, frecuencias y estado del hardware)", "The PC tab (temperatures, power, clocks and hardware health)");
             if (pc != null) modulos.Add(pc);
             foreach (Modulo m in modulos)
             {
@@ -299,17 +345,15 @@ namespace Xuca
             timerTema.Interval = 5000;
             timerTema.Tick += delegate { if (fv != null && tema == "sistema" && EsOscuro() != oscuroAhora) AplicarTema(); };
 
-            // Los accesos de inicio de los monitores viejos (Monitor USB y Monitor de red) se cambian por uno solo
-            bool habiaViejo = false;
-            foreach (string viejo in new string[] { "Monitor USB.lnk", "Monitor de red.lnk" })
+            // "Iniciar con Windows": la tarea de antes del cambio de nombre (XucaMonitor_Inicio) pasa a Pulso_Inicio. La vieja
+            // se borra recien cuando la nueva quedo creada, asi nunca se pierde. Se recrea siempre: si el .exe cambio de
+            // carpeta, la tarea se corrige sola.
+            bool tareaVieja = Schtasks("/query /tn \"" + TareaVieja + "\"") == 0;
+            if (tareaVieja || TareaExiste())
             {
-                string f = Path.Combine(inicio, viejo);
-                if (File.Exists(f)) { habiaViejo = true; try { File.Delete(f); } catch { } }
+                try { TareaCrear(); } catch { }
+                if (tareaVieja && TareaExiste()) Schtasks("/delete /tn \"" + TareaVieja + "\" /f");
             }
-            // Desde que la app pide administrador, el acceso directo de la carpeta de Inicio ya no alcanza
-            // (Windows no lo eleva solo): el "Iniciar con Windows" pasa a ser una tarea programada.
-            if (File.Exists(InicioLnk)) { try { File.Delete(InicioLnk); } catch { } habiaViejo = true; }
-            if (habiaViejo || TareaExiste()) { try { TareaCrear(); } catch { } }
 
             foreach (Modulo m in modulos)
             {
@@ -317,10 +361,17 @@ namespace Xuca
                 bool prender = !aj.TryGetValue(m.Clave, out on) || on != "0";
                 if (prender) m.Prender(true);
             }
-            try { OvMgr.Iniciar(Datos); } catch (Exception ex) { GuardarCrash(ex); }
+            // El resumen de cada corrida del modo benchmark queda en Rendimiento y avisa con un globito en la bandeja
+            Bench.Listo = delegate (string largo, string corto)
+            {
+                foreach (Modulo m in modulos) if (m is MonitorRend) { m.AgregarAviso(largo, 1); break; }
+                if (corto != null) EnUi(delegate { try { if (ni != null && ni.Visible) ni.ShowBalloonTip(10000, Nombre + " · Benchmark", corto, ToolTipIcon.Info); } catch { } });
+            };
+            // El overlay de FPS (y el modo benchmark) usa eventos de presentacion de Windows 10 u 11
+            if (Win10) { try { OvMgr.Iniciar(Datos); } catch (Exception ex) { GuardarCrash(ex); } }
             ActualizarTextos();
-            EmpezarBusquedaAct();
             if (!oculto) MostrarVentana(); else Recortar();
+            EmpezarBusquedaAct(); // al final: borra la version anterior solo si esta arranco entera
             return true;
         }
 
@@ -355,6 +406,8 @@ namespace Xuca
         // Un modulo agrego algo: se actualiza la ventana (si esta abierta) y el texto de la bandeja
         public void Cambio(Modulo m)
         {
+            // Un aviso de Rendimiento o de Red en medio de una corrida del modo benchmark: pudo ensuciar la prueba
+            if (Bench.Corriendo && (m is MonitorRend || m is MonitorRed)) Bench.Evento(m.Nombre + ": " + m.UltimoTitulo());
             EnUi(delegate
             {
                 if (fv != null && m == actual) LlenarTexto();
@@ -439,7 +492,8 @@ namespace Xuca
         // Como la app pide administrador, un acceso directo en la carpeta de Inicio no la eleva sola:
         // Windows no la arranca (o la arranca sin permisos). Por eso "Iniciar con Windows" usa una tarea
         // programada con "Ejecutar con los privilegios más altos", que SI se eleva solita al iniciar sesión.
-        const string TareaNombre = "XucaMonitor_Inicio";
+        const string TareaNombre = "Pulso_Inicio";
+        const string TareaVieja = "XucaMonitor_Inicio";   // la de hasta la 1.0.3: Iniciar la cambia por la nueva
 
         string UltimoError = "";
 
@@ -476,7 +530,7 @@ namespace Xuca
             string xml =
                 "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
                 "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
-                "  <RegistrationInfo><Description>Abre Xuca Monitor al iniciar sesion</Description></RegistrationInfo>\r\n" +
+                "  <RegistrationInfo><Description>Abre Pulso al iniciar sesion</Description></RegistrationInfo>\r\n" +
                 "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + Xml(usuario) + "</UserId><Delay>PT10S</Delay></LogonTrigger></Triggers>\r\n" +
                 "  <Principals><Principal id=\"Author\"><UserId>" + Xml(usuario) + "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\r\n" +
                 "  <Settings>\r\n" +
@@ -496,7 +550,7 @@ namespace Xuca
                 "  </Settings>\r\n" +
                 "  <Actions Context=\"Author\"><Exec><Command>" + Xml(Exe) + "</Command><Arguments>/inicio</Arguments><WorkingDirectory>" + Xml(Dir) + "</WorkingDirectory></Exec></Actions>\r\n" +
                 "</Task>\r\n";
-            string arch = Path.Combine(Path.GetTempPath(), "XucaMonitor_tarea.xml");
+            string arch = Path.Combine(Path.GetTempPath(), "Pulso_tarea.xml");
             try
             {
                 File.WriteAllText(arch, xml, Encoding.Unicode);
@@ -514,7 +568,42 @@ namespace Xuca
 
         void TareaBorrar()
         {
+            Schtasks("/delete /tn \"" + TareaVieja + "\" /f");
             Schtasks("/delete /tn \"" + TareaNombre + "\" /f");
+        }
+
+        // ---------- Carpeta de datos ----------
+        static string carpetaDatos;   // la que eligio Iniciar (GuardarCrash la usa)
+
+        // Documentos\Pulso. Si todavia esta la de antes del cambio de nombre (Documentos\Xuca Monitor) y no hay una
+        // nueva, se renombra entera (mismo disco: no se copia nada, no se puede perder a medias). Si no se puede mudar
+        // (algun archivo abierto por otro programa), se sigue usando la vieja y se reintenta en el proximo arranque.
+        static string CarpetaDatos(bool mudar)
+        {
+            string docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string nueva = Path.Combine(docs, Nombre), vieja = Path.Combine(docs, NombreViejo);
+            if (!Directory.Exists(nueva) && Directory.Exists(vieja))
+            {
+                if (!mudar || ViejaAbierta()) return vieja;
+                try { Directory.Move(vieja, nueva); }
+                catch { return vieja; }
+            }
+            return nueva;
+        }
+
+        // Si una Xuca Monitor (hasta la 1.0.3) sigue abierta, sigue escribiendo en la carpeta vieja: no se muda hasta
+        // que se cierre, asi los datos no quedan repartidos entre las dos carpetas.
+        static bool ViejaAbierta()
+        {
+            try
+            {
+                Mutex m;
+                if (!Mutex.TryOpenExisting("Local\\XucaMonitor", out m)) return false;
+                m.Dispose();
+                return true;
+            }
+            catch (UnauthorizedAccessException) { return true; }   // existe pero es de otro proceso con mas permisos
+            catch { return false; }
         }
 
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int ExtractIconEx(string f, int i, IntPtr[] g, IntPtr[] c, int n);
@@ -542,8 +631,6 @@ namespace Xuca
             return T("Tema: Sistema", "Theme: System");
         }
 
-        static readonly Color Celeste = Color.FromArgb(34, 211, 238);
-
         // Para que los paneles propios de cada modulo (PC) usen los mismos colores
         public bool Oscuro { get { return fv != null ? oscuroAhora : EsOscuro(); } }
 
@@ -557,7 +644,11 @@ namespace Xuca
             Color linea = osc ? Color.FromArgb(46, 52, 64) : Color.FromArgb(209, 213, 219);
             Color texto = osc ? Color.White : Color.FromArgb(17, 24, 39);
             Color gris = osc ? Color.FromArgb(150, 160, 175) : Color.FromArgb(107, 114, 128);
-            Color elegida = osc ? Color.FromArgb(14, 52, 60) : Color.FromArgb(207, 250, 254);
+            // Verde propio de la app (borde y dibujo del icono; el fondo #14161B del icono es el de la ventana).
+            // Solo en controles y seleccion: los colores de estado (bien/atencion/mal) van siempre con texto.
+            Color acento = osc ? Color.FromArgb(74, 222, 128) : Color.FromArgb(21, 128, 61);
+            Color elegida = osc ? Color.FromArgb(22, 50, 35) : Color.FromArgb(220, 252, 231);
+            Color encima = osc ? Color.FromArgb(32, 46, 40) : Color.FromArgb(236, 247, 240);   // hover: gris con un toque de verde
             fv.BackColor = fondo; fv.ForeColor = texto;
             arriba.BackColor = fondo; fila2.BackColor = fondo; medio.BackColor = fondo;
             if (panelExtra != null)
@@ -574,9 +665,9 @@ namespace Xuca
                 foreach (KeyValuePair<Modulo, Button> p in pestanas) if (p.Value == b) { pest = true; sel = p.Key == actual; }
                 b.BackColor = sel ? elegida : tarj;
                 b.ForeColor = texto;
-                b.FlatAppearance.BorderColor = sel ? Celeste : linea;
+                b.FlatAppearance.BorderColor = sel ? acento : linea;
                 b.FlatAppearance.BorderSize = pest && sel ? 2 : 1;
-                b.FlatAppearance.MouseOverBackColor = sel ? elegida : linea;
+                b.FlatAppearance.MouseOverBackColor = sel ? elegida : encima;
             }
             // Barra de titulo oscura o clara (Windows 10 20H1 o mas nuevo)
             try
@@ -659,7 +750,7 @@ namespace Xuca
                         ? "Watching since " + actual.Desde.ToString("HH:mm") + " on " + actual.Desde.ToString("MM/dd") + "   ·   " + cont + ": " + actual.Contador() + "   ·   Minimizing or closing keeps it in the tray (next to the clock)."
                         : "Vigilando desde las " + actual.Desde.ToString("HH:mm") + " del " + actual.Desde.ToString("dd/MM") + "   ·   " + cont + ": " + actual.Contador() + "   ·   Minimizar o cerrar la deja en la bandeja (al lado del reloj).";
             }
-            // Texto de la bandeja: "Xuca Monitor - Red 2 · USB 5"
+            // Texto de la bandeja: "Pulso - Red 2 · USB 5"
             StringBuilder tip = new StringBuilder(Nombre + " -");
             foreach (Modulo m in modulos)
             {
@@ -761,7 +852,11 @@ namespace Xuca
                 ActualizarTextos();
             });
 
-            bOver = Boton(arriba, delegate { OvAjustes.Mostrar(); });
+            bOver = Boton(arriba, delegate
+            {
+                if (Win10) OvAjustes.Mostrar();
+                else MessageBox.Show(SoloWin10("El overlay de FPS y el modo benchmark", "The FPS overlay and benchmark mode"), Nombre, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            });
 
             // Ko-fi: celeste fijo, igual que en el Xuca OPtimizer (no cambia con el tema)
             bKofi = Boton(arriba, delegate { try { Process.Start("https://ko-fi.com/011xuca"); } catch { } });
@@ -879,22 +974,23 @@ namespace Xuca
         }
 
         // Si algo se rompe antes de mostrar la ventana (o en cualquier momento), en vez de cerrarse sin avisar
-        // nada, deja un registro en Documentos\Xuca Monitor\crash.txt y muestra el error.
+        // nada, deja un registro en Documentos\Pulso\crash.txt y muestra el error.
         static void GuardarCrash(object ex)
         {
             string msg = ex == null ? "(error desconocido)" : ex.ToString();
+            // Sin mudar la carpeta: esto puede correr antes de tomar el mutex
+            string arch = Path.Combine(carpetaDatos ?? CarpetaDatos(false), "crash.txt");
             try
             {
-                string carpeta = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Xuca Monitor");
-                Directory.CreateDirectory(carpeta);
-                File.AppendAllText(Path.Combine(carpeta, "crash.txt"), DateTime.Now + "\r\n" + msg + "\r\n\r\n");
+                Directory.CreateDirectory(Path.GetDirectoryName(arch));
+                File.AppendAllText(arch, DateTime.Now + "\r\n" + msg + "\r\n\r\n");
             }
             catch { }
             try
             {
-                MessageBox.Show(T("Xuca Monitor tuvo un error:\r\n\r\n", "Xuca Monitor had an error:\r\n\r\n") + msg +
-                    T("\r\n\r\nQuedó guardado en Documentos\\Xuca Monitor\\crash.txt", "\r\n\r\nIt was saved in Documents\\Xuca Monitor\\crash.txt"),
-                    "Xuca Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(T("Pulso tuvo un error:\r\n\r\n", "Pulso had an error:\r\n\r\n") + msg +
+                    T("\r\n\r\nQuedó guardado en ", "\r\n\r\nIt was saved in ") + arch,
+                    Nombre, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch { }
         }
@@ -915,7 +1011,7 @@ namespace Xuca
                 if (cargadas.TryGetValue(corto, out a)) return a;
                 try
                 {
-                    using (Stream st = typeof(XucaMonitor).Assembly.GetManifestResourceStream("lib." + corto + ".dll"))
+                    using (Stream st = typeof(Pulso).Assembly.GetManifestResourceStream("lib." + corto + ".dll"))
                     {
                         if (st != null)
                         {
@@ -943,10 +1039,10 @@ namespace Xuca
             AppDomain.CurrentDomain.AssemblyResolve += ResolverDeLib;
             AppDomain.CurrentDomain.UnhandledException += delegate (object s, UnhandledExceptionEventArgs e) { GuardarCrash(e.ExceptionObject); };
             Application.ThreadException += delegate (object s, ThreadExceptionEventArgs e) { GuardarCrash(e.Exception); };
+            if (!NetAlcanza()) return;
+            bool actualizado = false, oculto = false;
             try
             {
-                bool oculto = false;
-                bool actualizado = false;
                 foreach (string a in args)
                 {
                     if (a.Equals("/inicio", StringComparison.OrdinalIgnoreCase)) oculto = true;
@@ -954,10 +1050,41 @@ namespace Xuca
                 }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                XucaMonitor app = new XucaMonitor();
+                Pulso app = new Pulso();
                 if (app.Iniciar(oculto, actualizado)) Application.Run(app);
             }
-            catch (Exception ex) { GuardarCrash(ex); }
+            catch (Exception ex)
+            {
+                GuardarCrash(ex);
+                if (actualizado) VolverAVersionAnterior(oculto);
+            }
+        }
+
+        // Las dll de los sensores piden .NET Framework 4.7.2 o mas nuevo. Windows 10 (1803+) y 11 ya lo traen;
+        // Windows 7 SP1 y 8.1 necesitan instalar el 4.8. Sin esto la app se caeria con un error confuso.
+        static bool NetAlcanza()
+        {
+            object rel = null;
+            try { rel = Registry.GetValue("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full", "Release", null); }
+            catch { return true; } // si no se puede leer, se intenta igual
+            if (rel is int && (int)rel >= 461808) return true; // 461808 = 4.7.2
+            // Windows 8 (no 8.1) no puede instalar .NET 4.7.2 ni 4.8: no sirve mandarlo a la descarga
+            Version os = WinVer;
+            if (os.Major == 6 && os.Minor == 2)
+            {
+                bool es8 = Thread.CurrentThread.CurrentUICulture.TwoLetterISOLanguageName == "es";
+                MessageBox.Show(es8 ? "Pulso necesita Windows 7 SP1, 8.1, 10 u 11. Windows 8 no puede instalar el .NET Framework que hace falta: actualizá a Windows 8.1 (es gratis)."
+                    : "Pulso needs Windows 7 SP1, 8.1, 10 or 11. Windows 8 cannot install the required .NET Framework: update to Windows 8.1 (it is free).", Nombre, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+            bool es = Thread.CurrentThread.CurrentUICulture.TwoLetterISOLanguageName == "es";
+            if (MessageBox.Show(es ? "Pulso necesita .NET Framework 4.8 (gratis, de Microsoft).\r\n\r\n¿Abrir la página de descarga?"
+                    : "Pulso needs .NET Framework 4.8 (free, from Microsoft).\r\n\r\nOpen the download page?",
+                    Nombre, MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+            {
+                try { Process.Start("https://dotnet.microsoft.com/download/dotnet-framework/net48"); } catch { }
+            }
+            return false;
         }
     }
 }

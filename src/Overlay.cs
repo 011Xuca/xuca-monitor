@@ -80,9 +80,9 @@ namespace Xuca
             "<b><s=150>{fps!<60,30}</s></b> FPS   <c=8AB4FF>avg</c> {fps.avg}   <c=FFC83D>1% low</c> {low1!<60,30}\n" +
             "Frametime {ft:0.0} ms\n" +
             "{graph:240x40}\n" +
-            "<c=76B900>GPU </c> {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.clock} MHz  {gpu.power} W\n" +
+            "<c=76B900>GPU </c> {gpu.load!90,98}%  {gpu.temp!85,90}°C  {gpu.clock} MHz  {gpu.power} W\n" +
             "<c=76B900>VRAM</c> {gpu.vram} / {gpu.vramtotal} MB\n" +
-            "<c=FF6B6B>CPU </c> {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.clock} MHz\n" +
+            "<c=FF6B6B>CPU </c> {cpu.load!90,98}%  {cpu.temp!85,90}°C  {cpu.clock} MHz\n" +
             "<c=B794F6>RAM </c> {ram.used} / {ram.total} GB";
 
         // Plantillas por defecto de versiones anteriores: si el usuario guardo una de estas sin tocarla, se pasa a la nueva
@@ -90,7 +90,14 @@ namespace Xuca
             "<c=FFC83D>{gpu.name}</c>\n<b><s=150>{fps!<60,30}</s></b> FPS   1% low {low1!<60,30}\nFrametime {ft:0.0} ms\n{graph:240x40}\nGPU  {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.clock} MHz  {gpu.power} W\nVRAM {gpu.vram} / {gpu.vramtotal} MB\nCPU  {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.clock} MHz\nRAM  {ram.used} / {ram.total} GB",
             "<c=FFC83D>{gpu.name}</c>\n<b><s=150>{fps!<60,30}</s></b> FPS   avg {fps.avg}   1% low {low1!<60,30}\nFrametime {ft:0.0} ms\n{graph:240x40}\nGPU  {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.clock} MHz  {gpu.power} W\nVRAM {gpu.vram} / {gpu.vramtotal} MB\nCPU  {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.clock} MHz\nRAM  {ram.used} / {ram.total} GB"
         };
-        public static string Migrar(string p) { return Array.IndexOf(Viejas, p.Replace("\r\n", "\n")) >= 0 ? Defecto : p; }
+        public static string Migrar(string p)
+        {
+            string q = p.Replace("\r\n", "\n");
+            if (Array.IndexOf(Viejas, q) >= 0) return Defecto;
+            // Hasta la 1.0.3 los colores de temperatura arrancaban a 75-80 °C: un modelo de fabrica sin tocar pasa a los nuevos (85 y 90 °C)
+            q = q.Replace("{gpu.temp!75,85}", "{gpu.temp!85,90}").Replace("{cpu.temp!80,90}", "{cpu.temp!85,90}");
+            return Array.IndexOf(Presets, q) >= 0 ? q : p;
+        }
 
         public static readonly string[] PresetNombresEs = { "Completo", "Estilo Afterburner", "Solo FPS", "Mínimo", "Comparativa (videos)" };
         public static readonly string[] PresetNombresEn = { "Full", "Afterburner style", "FPS only", "Minimal", "Comparison (videos)" };
@@ -100,15 +107,16 @@ namespace Xuca
             "<c=FFC83D>{gpu.name}</c>\nGPU usage    {gpu.load}%\nGPU temp     {gpu.temp}°C\nGPU clock    {gpu.clock} MHz\nMemory usage {gpu.vram} MB\nCPU usage    {cpu.load}%\nCPU temp     {cpu.temp}°C\nRAM usage    {ram.used:0.0} GB\nFramerate    {fps} FPS\nFrametime    {ft:0.0} ms\n{graph:260x40}",
             "<b><s=180>{fps!<60,30}</s></b> FPS",
             "FPS {fps}   avg {fps.avg}   1% {low1}\nGPU {gpu.load}%  {gpu.temp}°C",
-            "<b><c=76B900>{gpu.name}</c></b>\n<b><c=FF6B6B>{cpu.name}</c></b>\n<b><s=200>{fps!<60,30}</s></b> FPS\n<c=8AB4FF>AVG</c> {fps.avg}   <c=FFC83D>1% LOW</c> {low1!<60,30}   <c=FFC83D>0.1% LOW</c> {low01!<60,30}\nFrametime {ft:0.0} ms\n{graph:260x40}\n<c=76B900>GPU </c> {gpu.load!90,98}%  {gpu.temp!75,85}°C  {gpu.power} W\n<c=76B900>VRAM</c> {gpu.vram} / {gpu.vramtotal} MB\n<c=FF6B6B>CPU </c> {cpu.load!90,98}%  {cpu.temp!80,90}°C  {cpu.power} W\n<c=B794F6>RAM </c> {ram.used} / {ram.total} GB"
+            "<b><c=76B900>{gpu.name}</c></b>\n<b><c=FF6B6B>{cpu.name}</c></b>\n<b><s=200>{fps!<60,30}</s></b> FPS\n<c=8AB4FF>AVG</c> {fps.avg}   <c=FFC83D>1% LOW</c> {low1!<60,30}   <c=FFC83D>0.1% LOW</c> {low01!<60,30}\nFrametime {ft:0.0} ms\n{graph:260x40}\n<c=76B900>GPU </c> {gpu.load!90,98}%  {gpu.temp!85,90}°C  {gpu.power} W\n<c=76B900>VRAM</c> {gpu.vram} / {gpu.vramtotal} MB\n<c=FF6B6B>CPU </c> {cpu.load!90,98}%  {cpu.temp!85,90}°C  {cpu.power} W\n<c=B794F6>RAM </c> {ram.used} / {ram.total} GB"
         };
     }
 
-    // ---------- Ajustes (Documentos\Xuca Monitor\overlay.txt, formato clave=valor) ----------
+    // ---------- Ajustes (Documentos\Pulso\overlay.txt, formato clave=valor) ----------
     internal sealed class OvCfg
     {
         public bool Activo = true;
         public bool SoloFrente = true;      // false: se queda visible mientras el juego este abierto (para capturarlo con OBS)
+        public bool Benchmark = false;      // modo benchmark: registra cada partida y al cerrar el juego deja un resumen (Bench.cs)
         public List<string> Procs = new List<string>();
         public string Fuente = "Consolas";
         public float Tam = 11;
@@ -116,7 +124,7 @@ namespace Xuca
         public int ColorTexto = Color.FromArgb(255, 255, 255).ToArgb();
         public int ColorFondo = Color.FromArgb(0, 0, 0).ToArgb();
         public int OpTexto = 100;           // 10..100
-        public int OpFondo = 60;            // 0..100
+        public int OpFondo = 0;             // 0..100. Por defecto sin fondo (el reborde ya hace legible el texto); un overlay.txt guardado lo pisa
         public string Esquina = "tl";       // tl, tr, bl, br
         public int X = 12, Y = 12;
         public string Tecla = "F10";        // "" = sin atajo
@@ -144,6 +152,7 @@ namespace Xuca
                 {
                     case "activo": Activo = v.Trim() != "0"; break;
                     case "solofrente": SoloFrente = v.Trim() != "0"; break;
+                    case "benchmark": if (conProcs) Benchmark = v.Trim() == "1"; break;
                     case "procs": if (conProcs) { Procs.Clear(); foreach (string p in v.Split('|')) if (p.Trim().Length > 0) Procs.Add(p.Trim()); } break;
                     case "fuente": if (v.Trim().Length > 0) Fuente = v.Trim(); break;
                     case "tam": if (float.TryParse(v.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out f) && f >= 6 && f <= 72) Tam = f; break;
@@ -168,6 +177,7 @@ namespace Xuca
             List<string> l = new List<string>();
             l.Add("activo=" + (Activo ? "1" : "0"));
             l.Add("solofrente=" + (SoloFrente ? "1" : "0"));
+            if (conProcs) l.Add("benchmark=" + (Benchmark ? "1" : "0"));
             if (conProcs) l.Add("procs=" + string.Join("|", Procs.ToArray()));
             l.Add("fuente=" + Fuente);
             l.Add("tam=" + Tam.ToString(CultureInfo.InvariantCulture));
@@ -207,7 +217,7 @@ namespace Xuca
     // ---------- FPS: sesion ETW en tiempo real (Present de DXGI y D3D9) ----------
     internal sealed unsafe class OvEtw
     {
-        const string NOMBRE = "XucaMonitorFps";
+        const string NOMBRE = "PulsoFps";
         static readonly Guid Dxgi = new Guid("CA11C036-0102-4A2D-A6AD-F03CFED5D3C9");
         static readonly Guid D3d9 = new Guid("783ACA0A-790E-4D7F-8451-AA850511C6B9");
 
@@ -354,6 +364,7 @@ namespace Xuca
                 lock (lk)
                 {
                     if (!pids.Contains(pid)) return;
+                    Bench.Cuadro(pid, sc, ms);
                     ultLlegada = Stopwatch.GetTimestamp() * aMs;
                     Dictionary<ulong, List<double>> porSc;
                     if (!frames.TryGetValue(pid, out porSc)) { porSc = new Dictionary<ulong, List<double>>(); frames[pid] = porSc; }
@@ -598,7 +609,7 @@ namespace Xuca
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             TopMost = true;
-            Text = "Xuca Overlay";   // titulo fijo: asi OBS lo lista en "Captura de ventana"
+            Text = "Pulso Overlay";   // titulo fijo: asi OBS lo lista en "Captura de ventana"
         }
 
         protected override bool ShowWithoutActivation { get { return true; } }
@@ -848,6 +859,7 @@ namespace Xuca
             if (guardar) { try { File.WriteAllLines(arch, cfg.Texto(true)); } catch { } }
             if (tecla != null) tecla.Poner(cfg.Tecla);
             bool vigilar = cfg.Activo && cfg.Procs.Count > 0;
+            if (!cfg.Benchmark && Bench.Corriendo) Bench.Terminar(Path.GetDirectoryName(arch));   // se apago el modo a mitad de partida
             tDetectar.Enabled = vigilar;
             if (!vigilar) Parar();
             else Detectar();
@@ -881,15 +893,32 @@ namespace Xuca
             pidsJuego = pids;
             if (pids.Count == 0) { Parar(); return; }
             if (etw == null) etw = new OvEtw();
-            if (!etw.Andando) etw.Iniciar();
+            bool fpsOk = etw.Andando || etw.Iniciar();
             etw.Procesos(pids);
             if (!sensoresOn) IniciarSensores();
             tRefrescar.Enabled = true;
+
+            // Modo benchmark: la corrida empieza cuando se abre el juego y se toma una muestra de sensores por segundo
+            if (cfg.Benchmark)
+            {
+                if (!Bench.Corriendo)
+                {
+                    Bench.Motivo = !OvEtw.Posible ? Modulo.T("Hace falta Windows de 64 bits.", "64-bit Windows is required.")
+                        : !fpsOk ? Modulo.T("Windows no dejó abrir la sesión de eventos (ETW) que mide los FPS.", "Windows did not allow opening the event session (ETW) that measures FPS.") : "";
+                    string nom = ""; foreach (string n in pidNombre.Values) { nom = n; break; }
+                    Bench.Empezar(nom);
+                }
+                Lectura l; lock (lkSens) { l = ultima; }
+                IntPtr fg = GetForegroundWindow(); uint fpid = 0;
+                if (fg != IntPtr.Zero) GetWindowThreadProcessId(fg, out fpid);
+                Bench.Muestra(l, pids.Contains(fpid));
+            }
         }
 
         static void Parar()
         {
             tRefrescar.Enabled = prueba;
+            if (Bench.Corriendo) Bench.Terminar(Path.GetDirectoryName(arch));
             if (etw != null && etw.Andando) etw.Parar();
             PararSensores();
             fpsMin = fpsMax = fpsSuma = 0; fpsMuestras = 0;
@@ -999,6 +1028,7 @@ namespace Xuca
 
         public static void Detener()
         {
+            if (Bench.Corriendo && arch != null) Bench.Terminar(Path.GetDirectoryName(arch));   // se cierra la app con el juego abierto: se guarda igual
             if (tDetectar != null) { tDetectar.Dispose(); tDetectar = null; }
             if (tRefrescar != null) { tRefrescar.Dispose(); tRefrescar = null; }
             if (etw != null) { etw.Parar(); etw = null; }
@@ -1016,7 +1046,7 @@ namespace Xuca
 
         OvCfg c;
         bool cargando;
-        CheckBox chkActivo, chkNegrita, chkFrente;
+        CheckBox chkActivo, chkNegrita, chkFrente, chkBench;
         ListBox lista;
         ComboBox cmbProc, cmbEsq, cmbTecla, cmbVar, cmbPre;
         TextBox txt;
@@ -1053,8 +1083,12 @@ namespace Xuca
             chkActivo.Text = T("Overlay activado (solo aparece cuando uno de estos juegos está abierto)", "Overlay enabled (only shows while one of these games is open)");
             chkActivo.CheckedChanged += Cambio; f.Controls.Add(chkActivo);
             chkFrente = new CheckBox(); chkFrente.AutoSize = true; chkFrente.MaximumSize = new Size(540, 0);
-            chkFrente.Text = T("Ocultarlo cuando el juego no está al frente (destildalo para capturarlo con OBS: Captura de ventana > \"Xuca Overlay\")", "Hide it when the game isn't in front (untick it to capture it with OBS: Window Capture > \"Xuca Overlay\")");
+            chkFrente.Text = T("Ocultarlo cuando el juego no está al frente (destildalo para capturarlo con OBS: Captura de ventana > \"Pulso Overlay\")", "Hide it when the game isn't in front (untick it to capture it with OBS: Window Capture > \"Pulso Overlay\")");
             chkFrente.CheckedChanged += Cambio; f.Controls.Add(chkFrente);
+            chkBench = new CheckBox(); chkBench.AutoSize = true; chkBench.MaximumSize = new Size(540, 0);
+            chkBench.Text = T("Modo benchmark: registrar cada partida de estos juegos y, al cerrar el juego, dejar en Rendimiento un resumen (FPS, 1 % y 0.1 % low, sensores y problemas encontrados). Se guarda en Documentos\\Pulso\\benchmarks.",
+                              "Benchmark mode: record every session of these games and, when the game closes, leave a summary in Performance (FPS, 1% and 0.1% low, sensors and problems found). Saved in Documents\\Pulso\\benchmarks.");
+            chkBench.CheckedChanged += Cambio; f.Controls.Add(chkBench);
 
             // Juegos
             GroupBox gp = Grupo(T("Juegos (nombre del proceso, sin .exe)", "Games (process name, without .exe)"), 150, f);
@@ -1111,8 +1145,8 @@ namespace Xuca
 
             Label ayuda = new Label(); ayuda.AutoSize = false; ayuda.SetBounds(10, 254, 510, 70);
             ayuda.Text = T(
-                "Escribí lo que quieras y poné las variables entre llaves: {gpu.name}, {fps}, {gpu.temp}...  Color: <c=FF0000>texto</c>   Tamaño: <s=150>texto</s> (150 %)   Negrita: <b>texto</b>   Formato: {gpu.power:0.0}   Alerta por valor: {gpu.temp!75,85} (naranja desde 75, rojo desde 85); en FPS al revés: {fps!<60,30}   Gráfico: {graph:260x40}",
-                "Write whatever you want and put variables in braces: {gpu.name}, {fps}, {gpu.temp}...  Color: <c=FF0000>text</c>   Size: <s=150>text</s> (150 %)   Bold: <b>text</b>   Format: {gpu.power:0.0}   Alert by value: {gpu.temp!75,85} (orange from 75, red from 85); for FPS reversed: {fps!<60,30}   Graph: {graph:260x40}");
+                "Escribí lo que quieras y poné las variables entre llaves: {gpu.name}, {fps}, {gpu.temp}...  Color: <c=FF0000>texto</c>   Tamaño: <s=150>texto</s> (150 %)   Negrita: <b>texto</b>   Formato: {gpu.power:0.0}   Alerta por valor: {gpu.temp!85,90} (naranja desde 85, rojo desde 90); en FPS al revés: {fps!<60,30}   Gráfico: {graph:260x40}",
+                "Write whatever you want and put variables in braces: {gpu.name}, {fps}, {gpu.temp}...  Color: <c=FF0000>text</c>   Size: <s=150>text</s> (150 %)   Bold: <b>text</b>   Format: {gpu.power:0.0}   Alert by value: {gpu.temp!85,90} (orange from 85, red from 90); for FPS reversed: {fps!<60,30}   Graph: {graph:260x40}");
             gt.Controls.Add(ayuda);
 
             // Estilo
@@ -1182,7 +1216,7 @@ namespace Xuca
             {
                 using (SaveFileDialog sd = new SaveFileDialog())
                 {
-                    sd.Filter = "Xuca overlay (*.txt)|*.txt"; sd.FileName = "estilo-overlay.txt";
+                    sd.Filter = "Pulso overlay (*.txt)|*.txt"; sd.FileName = "estilo-overlay.txt";
                     if (sd.ShowDialog(this) == DialogResult.OK) { try { File.WriteAllLines(sd.FileName, c.Texto(false)); } catch { } }
                 }
             };
@@ -1192,7 +1226,7 @@ namespace Xuca
             {
                 using (OpenFileDialog od = new OpenFileDialog())
                 {
-                    od.Filter = "Xuca overlay (*.txt)|*.txt";
+                    od.Filter = "Pulso overlay (*.txt)|*.txt";
                     if (od.ShowDialog(this) == DialogResult.OK)
                     {
                         try { c.Leer(File.ReadAllLines(od.FileName), false); Cargar(); Cambio(null, null); } catch { }
@@ -1244,6 +1278,7 @@ namespace Xuca
             cargando = true;
             chkActivo.Checked = c.Activo;
             chkFrente.Checked = c.SoloFrente;
+            chkBench.Checked = c.Benchmark;
             lista.Items.Clear();
             foreach (string p in c.Procs) lista.Items.Add(p);
             txt.Text = c.Plantilla.Replace("\r\n", "\n").Replace("\n", "\r\n");
@@ -1281,6 +1316,7 @@ namespace Xuca
             if (cargando) return;
             c.Activo = chkActivo.Checked;
             c.SoloFrente = chkFrente.Checked;
+            c.Benchmark = chkBench.Checked;
             c.Procs.Clear();
             foreach (object p in lista.Items) c.Procs.Add((string)p);
             c.Plantilla = txt.Text.Replace("\r\n", "\n");

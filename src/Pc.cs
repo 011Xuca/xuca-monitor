@@ -332,7 +332,7 @@ namespace Xuca
             hilo = new Thread(Vuelta);
             hilo.IsBackground = true;
             hilo.Priority = ThreadPriority.BelowNormal;
-            hilo.Name = "XucaMonitor PC";
+            hilo.Name = "Pulso PC";
             hilo.Start();
         }
 
@@ -961,16 +961,17 @@ namespace Xuca
         bool ramConfigAvisada, planAvisado, bateriaAvisada;
         string juegoAnterior = "";
 
+        // Temperatura de CPU y GPU: hasta 85 °C es normal jugando (80 °C no es nada), de 85 a 89 °C se pinta amarillo (solo
+        // visual, sin aviso) y desde 90 °C es rojo y avisa. En un CPU con TjMax bajo (Ryzen X3D: 89 °C) todo se corre a su limite.
+        public const float TempAmarillo = 85f, TempRojo = 90f;
+        public static float RojoCpu(int tj) { return Math.Min(TempRojo, (tj <= 0 ? 100 : tj) - 3); }
         public static Nivel NivelCpu(float? t, int tj)
         {
-            if (!t.HasValue) return Nivel.Gris;
-            if (tj <= 0) tj = 100;
-            if (t.Value >= tj - 3) return Nivel.Rojo;
-            if (t.Value >= tj - 15) return Nivel.Amarillo;
-            return Nivel.Verde;
+            float rojo = RojoCpu(tj);
+            return Umbral(t, Math.Min(TempAmarillo, rojo - 4), rojo);
         }
-        public static float RojoGpu(bool nvidia) { return nvidia ? 87f : 92f; }
-        public static Nivel NivelGpu(float? t, bool nvidia) { return Umbral(t, nvidia ? 80f : 84f, RojoGpu(nvidia)); }
+        public static float RojoGpu(bool nvidia) { return TempRojo; }
+        public static Nivel NivelGpu(float? t, bool nvidia) { return Umbral(t, TempAmarillo, RojoGpu(nvidia)); }
         public static Nivel NivelHot(float? t) { return Umbral(t, 95f, 105f); }
         public static Nivel NivelMemGpu(float? t) { return Umbral(t, 95f, 104f); }
         public static Nivel NivelRam(float uso) { return uso < 0 ? Nivel.Gris : Umbral(uso, 85f, 93f); }
@@ -1030,15 +1031,16 @@ namespace Xuca
                 }
                 else if (c == -1 && r.Avisada) Volvio(CAT_CPU, T("CPU: volvió a una temperatura normal", "CPU: temperature back to normal"), r, Gc(t));
 
-                // Caliente mucho rato (amarillo durante 3 minutos seguidos)
+                // Caliente mucho rato: 90 °C o mas durante 3 minutos seguidos (sin llegar a su limite, que avisa aparte)
                 Regla rc = R("cpu_caliente");
-                int cc = rc.Paso(rc.Activa ? t >= tj - 18 : t >= tj - 15, 90, 15);
+                float caliente = RojoCpu(tj);
+                int cc = rc.Paso(rc.Activa ? t >= caliente - 3 : t >= caliente, 90, 15);
                 if (rc.Activa) rc.Pico = M(rc.Pico, t);
                 if (cc == 1 && !R("cpu_limite").Activa && rc.PuedeAvisar(30))
                 {
                     List<string> que = new List<string>();
-                    que.Add(T("El procesador estuvo más de 3 minutos seguidos por encima de " + (tj - 15) + " °C (llegó a " + Gc(rc.Pico) + "). Todavía no es su límite (" + tj + " °C), pero está trabajando muy caliente.",
-                              "The CPU was above " + (tj - 15) + " °C for more than 3 minutes straight (it reached " + Gc(rc.Pico) + "). It is not its limit yet (" + tj + " °C), but it is running very hot."));
+                    que.Add(T("El procesador estuvo más de 3 minutos seguidos a " + (int)caliente + " °C o más (llegó a " + Gc(rc.Pico) + "). Todavía no es su límite (" + tj + " °C), pero está trabajando muy caliente.",
+                              "The CPU was at " + (int)caliente + " °C or more for over 3 minutes straight (it reached " + Gc(rc.Pico) + "). It is not its limit yet (" + tj + " °C), but it is running very hot."));
                     string top = TopProcesos(false, 3);
                     if (top != "") que.Add(T("Lo que más lo usaba: ", "What used it the most: ") + top);
                     List<string> probar = new List<string>();
@@ -1495,7 +1497,7 @@ namespace Xuca
                   "The OFFICIAL PawnIO installer (github.com/namazso/PawnIO.Setup) will be downloaded and opened.\r\n\r\n" +
                   "PawnIO is a free, signed driver that allows reading CPU temperature and watts and motherboard fans. It is the same one LibreHardwareMonitor and FanControl use.\r\n\r\n" +
                   "Before opening it, its author's digital signature (namazso) is verified. You can uninstall it anytime from Settings > Apps.\r\n\r\nContinue?"),
-                XucaMonitor.Nombre, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                Pulso.Nombre, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (r != DialogResult.Yes) return;
             instalando = true;
             EstadoPawn = T("Bajando PawnIO...", "Downloading PawnIO...");
@@ -1508,7 +1510,7 @@ namespace Xuca
                     ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
                     using (WebClient wc = new WebClient())
                     {
-                        wc.Headers[HttpRequestHeader.UserAgent] = "XucaMonitor/" + XucaMonitor.Version;
+                        wc.Headers[HttpRequestHeader.UserAgent] = "Pulso/" + Pulso.Version;
                         wc.DownloadFile(UrlPawn, arch);
                     }
                     byte[] b = File.ReadAllBytes(arch);
@@ -1527,8 +1529,8 @@ namespace Xuca
                 bool ok = error == null && PawnOk;
                 EnUi(delegate
                 {
-                    if (ok) MessageBox.Show(T("Listo: PawnIO quedó instalado. En unos segundos vas a ver la temperatura del procesador.", "Done: PawnIO is installed. You will see the CPU temperature in a few seconds."), XucaMonitor.Nombre, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    else MessageBox.Show(T("No se pudo instalar PawnIO: ", "Could not install PawnIO: ") + (error ?? T("el instalador se cerró sin terminar", "the installer closed without finishing")), XucaMonitor.Nombre, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (ok) MessageBox.Show(T("Listo: PawnIO quedó instalado. En unos segundos vas a ver la temperatura del procesador.", "Done: PawnIO is installed. You will see the CPU temperature in a few seconds."), Pulso.Nombre, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    else MessageBox.Show(T("No se pudo instalar PawnIO: ", "Could not install PawnIO: ") + (error ?? T("el instalador se cerró sin terminar", "the installer closed without finishing")), Pulso.Nombre, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 });
             });
         }

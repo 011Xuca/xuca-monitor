@@ -233,7 +233,7 @@ namespace Xuca
             if (res == "") { a.Pc.Clear(); return; }
             a.Pc.Add("  " + res);
             bool cpuCal = Foto.Hay(p.CpuT) && p.CpuT >= tj - 3;
-            bool gpuCal = (Foto.Hay(p.GpuT) && p.GpuT >= 87) || (Foto.Hay(p.GpuH) && p.GpuH >= 105);
+            bool gpuCal = (Foto.Hay(p.GpuT) && p.GpuT >= MonitorPC.TempRojo) || (Foto.Hay(p.GpuH) && p.GpuH >= 105);
             bool hayTemps = Foto.Hay(p.CpuT) || Foto.Hay(p.GpuT);
             switch (a.Tipo)
             {
@@ -313,7 +313,7 @@ namespace Xuca
                     a.Que.Add(T("Por eso la pantalla se pone negra unos segundos o el juego se cierra.", "That is why the screen goes black for a few seconds or the game closes."));
                     a.Probar.Add(T("Si tenés overclock o undervolt en la placa de video (MSI Afterburner, etc.), sacalo.", "If you have an overclock or undervolt on the graphics card (MSI Afterburner, etc.), remove it."));
                     a.Probar.Add(T("Reinstalá el driver de video limpio: DDU y después el driver nuevo (DDU está en Apps recomendadas del Xuca OPtimizer).", "Reinstall the video driver cleanly: DDU and then the new driver (DDU is in Xuca OPtimizer's Recommended apps)."));
-                    a.Probar.Add(T("Mirá la temperatura de la placa en la pestaña PC > GPU mientras jugás. Si pasa de 85 °C (o el hot spot de 100 °C), limpiá el polvo.", "Check the card temperature in the PC > GPU tab while gaming. If it goes over 85 °C (or the hot spot over 100 °C), clean the dust."));
+                    a.Probar.Add(T("Mirá la temperatura de la placa en la pestaña PC > GPU mientras jugás. Si llega a 90 °C (o el hot spot a 105 °C), limpiá el polvo.", "Check the card temperature in the PC > GPU tab while gaming. If it reaches 90 °C (or the hot spot 105 °C), clean the dust."));
                     a.Probar.Add(T("Si se repite con juegos pesados, puede ser la fuente (poca potencia o vieja).", "If it keeps happening with heavy games, it can be the power supply (too weak or old)."));
                     break;
                 case "pantallazo":

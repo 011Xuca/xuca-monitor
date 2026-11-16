@@ -1,6 +1,24 @@
 # Cambios
 
-Todo lo que cambió en cada versión de **Xuca Monitor**. La más nueva va arriba.
+Todo lo que cambió en cada versión de **Pulso**. La más nueva va arriba.
+
+## v1.0.4
+
+### Nuevo
+- La app se renombró de Xuca Monitor a **Pulso** (`Pulso.exe`, repo `github.com/011Xuca/pulse`); los datos y el "Iniciar con Windows" se mudan solos la primera vez que abre.
+- **Busca actualizaciones al abrir**: una sola vez por cada arranque, sin chequeos en segundo plano. Si hay una versión nueva aparece el cartel amarillo para actualizar.
+- **Modo benchmark** (en los ajustes del overlay): registra cada partida de los juegos de la lista y, al cerrar el juego, deja en Rendimiento un resumen con FPS promedio, 1 % y 0.1 % low de toda la corrida, frametime, tirones, y promedio y máximo de temperatura, uso, frecuencia y consumo de CPU y GPU, y de la RAM. También dice los **problemas que encontró**: throttling térmico o de energía, tirones, FPS desparejos, cuello de botella del procesador, RAM casi llena y avisos de Rendimiento o Red durante la prueba. Cada corrida se guarda en `Documentos\Pulso\benchmarks` (un `.txt` y una fila en `benchmarks.csv`) y se compara con la anterior del mismo juego.
+
+### Cambios
+- Pulso tiene **color propio: verde**. Cambian el ícono (borde y dibujo; el fondo sigue gris oscuro) y la ventana: pestaña elegida, botones, casillas y selección. Los gráficos y los colores de estado (verde, amarillo, rojo) de la pestaña PC no cambian.
+- Si la app actualizada encuentra otra copia del mismo `.exe` todavía abierta (otra sesión de Windows, o una versión anterior colgada), la cierra para poder reemplazar el archivo.
+- **Overlay de FPS**: ahora arranca **sin fondo** (opacidad del fondo en 0). Si ya lo tenías configurado, se mantiene lo tuyo.
+- **Actualización más segura**: antes de reemplazar el `.exe`, verifica que la descarga esté completa (mismo SHA-256 que publica GitHub) y que sea de verdad la versión anunciada. Si el `.exe` publicado dijera una versión menor, ya no se instala, porque si no la app volvería a ofrecer la misma actualización para siempre.
+- Si la versión recién bajada **no logra abrir**, vuelve sola a la anterior en vez de dejar la app rota. La versión anterior se borra recién cuando la nueva terminó de arrancar.
+- Se limpian los restos de una actualización cortada a la mitad (`.nuevo`, `.roto`).
+- **Temperaturas**: 80 °C ya no es "caliente". La temperatura del procesador y de la placa de video se pinta amarilla desde 85 °C (sin aviso) y roja, con aviso, desde 90 °C. En procesadores con un límite más bajo (Ryzen X3D: 89 °C), el rojo arranca 3 °C antes de ese límite. Los colores del overlay pasan a 85/90 °C (si tenías un modelo de fábrica sin tocar, se actualiza solo).
+- **Windows 7 SP1 y 8.1**: Pulso anda recortado. Funcionan Red, USB, Errores y Rendimiento (sin datos de la placa de video ni de velocidad del procesador). La pestaña PC, el overlay de FPS y el modo benchmark son solo para Windows 10 y 11, y la app lo avisa en vez de fallar.
+- Si falta **.NET Framework 4.7.2 o más nuevo** (Windows 7 SP1 y 8.1 no lo traen de fábrica), avisa y ofrece abrir la descarga del 4.8, en vez de cerrarse con un error confuso. En Windows 8 (sin el .1), que no puede instalarlo, avisa que hace falta actualizar a 8.1.
 
 ## v1.0.3
 
@@ -23,7 +41,7 @@ Todo lo que cambió en cada versión de **Xuca Monitor**. La más nueva va arrib
   - **100 % personalizable con una plantilla de texto**: cada línea que escribís es una línea del overlay. Usás variables entre llaves (`{gpu.name}`, `{fps}`, `{low1}`, `{ft}`, `{gpu.temp}`, `{gpu.vram}`, `{cpu.clock}`, `{ram.used}`...; hay una lista para insertar con un clic), con **color** (`<c=FF0000>`), **tamaño** (`<s=150>`), **negrita** (`<b>`), **formato** (`{gpu.power:0.0}`), **alerta por valor** (`{gpu.temp!75,85}`: naranja y rojo; `{fps!<60,30}` al revés para FPS) y **gráfico de frametime** con el tamaño que quieras (`{graph:260x40}`). Trae modelos listos, incluido uno estilo Afterburner.
   - Fuente, tamaño, negrita, color base, y opacidad del texto y del fondo **por separado** (transparencia por pixel).
   - **Seguro con anti-cheats**: no inyecta nada en el juego. Los FPS salen de los eventos de Windows (ETW, DXGI y D3D9), como PresentMon, y el texto va en una ventana transparente por la que pasan los clics. Se ve con el juego en pantalla completa sin bordes o en ventana, no en pantalla completa exclusiva.
-  - **Capturable con OBS**: es una ventana aparte llamada "Xuca Overlay", así que se agrega como fuente de **Captura de ventana**. Destildando "Ocultarlo cuando el juego no está al frente" se queda visible mientras el juego esté abierto, aunque estés mirando OBS.
+  - **Capturable con OBS**: es una ventana aparte, así que se agrega como fuente de **Captura de ventana**. Destildando "Ocultarlo cuando el juego no está al frente" se queda visible mientras el juego esté abierto, aunque estés mirando OBS.
   - **Sin gasto cuando no jugás**: sin un juego de la lista abierto no hay sesión ETW ni lectura de sensores, solo un chequeo de procesos por segundo.
   - **Reborde del texto**: negro por defecto y de 0 a 6 px, con color a elección, para que se lea sobre cualquier fondo.
   - **Promedio de FPS** (`{fps.avg}`) y **0.1 % low** (`{low01}`), y la plantilla por defecto ahora trae colores, el nombre de la CPU y de la GPU y el promedio. Quien tenía la plantilla vieja sin tocar pasa a la nueva solo.
@@ -34,7 +52,7 @@ Todo lo que cambió en cada versión de **Xuca Monitor**. La más nueva va arrib
 - **Rendimiento**: se sacó el aviso "Placa de video al máximo". La GPU al 100 % jugando es lo normal (no hay cuello de botella) y el aviso parecía un problema sin serlo. Siguen los avisos de bajones reales: procesador, RAM, disco, tirones y pérdida de foco.
 - La app ahora **pide permisos de administrador** al abrir (los sensores lo necesitan).
 - "Iniciar con Windows" usa una tarea programada (los accesos directos no se elevan solos). Además arranca aunque la notebook esté a batería y no se cierra a las 72 horas (dos trampas de las tareas que arma Windows por defecto).
-- Si algo falla al abrir, en vez de cerrarse sin avisar muestra el error y lo guarda en Documentos\Xuca Monitor\crash.txt.
+- Si algo falla al abrir, en vez de cerrarse sin avisar muestra el error y lo guarda en crash.txt, en la carpeta de datos.
 - Arreglado: el Snipping Tool (recorte de pantalla) ya no se detecta como juego, lo que daba avisos falsos de "perdió el foco" en Rendimiento.
 
 ## v1.0.2
@@ -54,4 +72,4 @@ Todo lo que cambió en cada versión de **Xuca Monitor**. La más nueva va arrib
 
 ## v1.0.0
 
-Primera versión: pestañas **Red** (cortes de internet y lag) y **USB** (qué se desconectó), en la bandeja, con tema claro/oscuro y español/inglés. Registros e historial en Documentos\Xuca Monitor.
+Primera versión: pestañas **Red** (cortes de internet y lag) y **USB** (qué se desconectó), en la bandeja, con tema claro/oscuro y español/inglés. Registros e historial en la carpeta Documentos.
