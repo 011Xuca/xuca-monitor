@@ -6,7 +6,7 @@ App gratis para **Windows 10 y 11** que vigila tu PC desde la bandeja (al lado d
 
 ## Descargar
 
-**[Descargar Pulso.exe](https://github.com/011Xuca/pulse/releases/latest/download/Pulso.exe)**
+**[Descargar Pulso.exe](https://github.com/011Xuca/pulso/releases/latest/download/Pulso.exe)**
 
 No hace falta instalar nada: lo abrís y listo. Usa el .NET que ya trae Windows (si a tu Windows le falta, la app te avisa y te lleva a la descarga de .NET Framework 4.8).
 

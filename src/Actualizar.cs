@@ -15,7 +15,7 @@ namespace Xuca
 {
     public partial class Pulso
     {
-        const string ApiUltima = "https://api.github.com/repos/011Xuca/pulse/releases/latest";
+        const string ApiUltima = "https://api.github.com/repos/011Xuca/pulso/releases/latest";
         const string AssetExe = "Pulso.exe";
 
         System.Threading.Timer timerAct;

@@ -5,7 +5,7 @@ Todo lo que cambió en cada versión de **Pulso**. La más nueva va arriba.
 ## v1.0.4
 
 ### Nuevo
-- La app se renombró de Xuca Monitor a **Pulso** (`Pulso.exe`, repo `github.com/011Xuca/pulse`); los datos y el "Iniciar con Windows" se mudan solos la primera vez que abre.
+- La app se renombró de Xuca Monitor a **Pulso** (`Pulso.exe`, repo `github.com/011Xuca/pulso`); los datos y el "Iniciar con Windows" se mudan solos la primera vez que abre.
 - **Busca actualizaciones al abrir**: una sola vez por cada arranque, sin chequeos en segundo plano. Si hay una versión nueva aparece el cartel amarillo para actualizar.
 - **Modo benchmark** (en los ajustes del overlay): registra cada partida de los juegos de la lista y, al cerrar el juego, deja en Rendimiento un resumen con FPS promedio, 1 % y 0.1 % low de toda la corrida, frametime, tirones, y promedio y máximo de temperatura, uso, frecuencia y consumo de CPU y GPU, y de la RAM. También dice los **problemas que encontró**: throttling térmico o de energía, tirones, FPS desparejos, cuello de botella del procesador, RAM casi llena y avisos de Rendimiento o Red durante la prueba. Cada corrida se guarda en `Documentos\Pulso\benchmarks` (un `.txt` y una fila en `benchmarks.csv`) y se compara con la anterior del mismo juego.
 
