@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.locale.1.6.0.schema.json
+PackageIdentifier: 011Xuca.Pulso
+PackageVersion: __VERSION__
+PackageLocale: es-MX
+Publisher: 011Xuca
+PackageName: Pulso
+License: Freeware
+ShortDescription: 'Monitoreo integral de la PC desde la bandeja: latencia de red, USB, rendimiento en juegos, errores de Windows, sensores del hardware y grabación de sesiones.'
+Description: |-
+  Pulso vigila la PC desde la bandeja y explica qué pasó y qué probar: cortes de internet y lag (ping y jitter en vivo),
+  desconexiones de USB, caídas de FPS jugando, pantalla negra, pantallazos azules y cierres, y el estado del procesador,
+  la placa de video, la memoria y los discos (temperaturas, frecuencias, consumo, VRAM, paginación, tipo NVMe/SATA/HDD,
+  salud SMART y velocidad de lectura/escritura). Trae un overlay de rendimiento y un grabador de sesión temporizado con
+  FPS promedio, 1 % y 0.1 % low, frametimes, cuello de botella y diagnóstico del sistema.
+Tags:
+- monitoreo
+- hardware
+- fps
+- overlay
+- gaming
+- temperatura
+- red
+- latencia
+ManifestType: locale
+ManifestVersion: 1.6.0

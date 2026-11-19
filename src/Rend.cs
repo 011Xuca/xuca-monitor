@@ -73,7 +73,7 @@ namespace Xuca
         static readonly int miPid = Process.GetCurrentProcess().Id;
         volatile int pidJuego;
         string nomJuego = "";
-        // El juego que se esta jugando ahora (lo usa la pestaña PC para los maximos "jugando" y el contexto de los avisos)
+        // El juego que se esta jugando ahora (lo usa el monitor de hardware para los maximos "jugando" y el contexto de los avisos)
         public static volatile string JuegoAhora = "";
 
         // Devuelve el pid del juego en pantalla completa que esta adelante (0 si no hay)
@@ -528,7 +528,7 @@ namespace Xuca
             else
             {
                 L.Add(T("  El procesador bajó mucho su velocidad (" + P(m.Perf) + " de su máximo de " + P(perfMax) + ") mientras jugabas.", "  The CPU lowered its speed a lot (" + P(m.Perf) + " of its " + P(perfMax) + " max) while you were playing."));
-                // Con la pestaña PC prendida se sabe si fue temperatura o energia (antes solo se podia adivinar)
+                // Con la pestaña CPU prendida se sabe si fue temperatura o energia (antes solo se podia adivinar)
                 Xuca.Foto f = MonitorPC.PicoEntre(DateTime.Now.AddSeconds(-15), DateTime.Now.AddSeconds(1));
                 int tj = MonitorPC.TjMax;
                 if (f != null && Xuca.Foto.Hay(f.CpuT) && f.CpuT >= tj - 6)
@@ -544,7 +544,7 @@ namespace Xuca
                 else
                 {
                     causaLento = "";
-                    L.Add(T("  Casi siempre es temperatura (se calienta y se frena solo) o energía (notebook a batería, plan de ahorro). Con la pestaña PC prendida (y PawnIO instalado) se sabe cuál de las dos.", "  It is almost always temperature (it heats up and slows itself) or power (laptop on battery, power saver plan). With the PC tab on (and PawnIO installed) you can tell which."));
+                    L.Add(T("  Casi siempre es temperatura (se calienta y se frena solo) o energía (notebook a batería, plan de ahorro). Con la pestaña CPU prendida (y PawnIO instalado) se sabe cuál de las dos.", "  It is almost always temperature (it heats up and slows itself) or power (laptop on battery, power saver plan). With the CPU tab on (and PawnIO installed) you can tell which."));
                 }
             }
             // Si justo antes otro programa le saco el foco al juego, seguro tuvo que ver
@@ -575,7 +575,7 @@ namespace Xuca
             if (tipo == "disco") L.Add(T("  - Si el juego está en un disco HDD, pasalo a un SSD. Revisá la salud del disco con CrystalDiskInfo.", "  - If the game is on an HDD, move it to an SSD. Check the drive health with CrystalDiskInfo."));
             if (tipo == "lento")
             {
-                if (causaLento != "energia") L.Add(T("  - Limpiá el polvo del cooler y del gabinete, y revisá la pasta térmica (si tiene más de 3-4 años, cambiala). En la pestaña PC > CPU ves la temperatura en vivo.", "  - Clean the dust from the cooler and case, and check the thermal paste (replace it if it is over 3-4 years old). The PC > CPU tab shows the temperature live."));
+                if (causaLento != "energia") L.Add(T("  - Limpiá el polvo del cooler y del gabinete, y revisá la pasta térmica (si tiene más de 3-4 años, cambiala). En la pestaña CPU ves la temperatura en vivo.", "  - Clean the dust from the cooler and case, and check the thermal paste (replace it if it is over 3-4 years old). The CPU tab shows the temperature live."));
                 if (causaLento != "temp") L.Add(T("  - Poné el plan de energía en Equilibrado o Alto rendimiento. En notebook: jugá enchufada.", "  - Set the power plan to Balanced or High performance. On a laptop: play plugged in."));
             }
             L.Add("");

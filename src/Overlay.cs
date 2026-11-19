@@ -16,6 +16,7 @@ using System.Drawing.Text;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -68,6 +69,42 @@ namespace Xuca
             new OvVar("graph", "Gráfico de frametime (ej. {graph:260x40})", "Frametime graph (e.g. {graph:260x40})", "")
         };
 
+        // ---------- Categorias que el usuario prende o apaga sin tocar la plantilla ----------
+        // Una linea con una variable de una categoria apagada no se dibuja. "temp" saca solo las temperaturas de su linea
+        // (y la linea entera si se queda sin datos). Se aplica al dibujar: la plantilla guardada no cambia.
+        public static readonly string[] CatClaves = { "fps", "ft", "cpu", "gpu", "vram", "ram", "temp", "nombres", "extra" };
+        public static readonly string[] CatEs = { "FPS y 1 % / 0.1 % low", "Frametime y gráfico", "CPU", "GPU", "VRAM", "RAM", "Temperaturas", "Nombres de CPU y GPU", "Hora y juego" };
+        public static readonly string[] CatEn = { "FPS and 1% / 0.1% low", "Frametime and graph", "CPU", "GPU", "VRAM", "RAM", "Temperatures", "CPU and GPU names", "Time and game" };
+
+        public static string CatDe(string key)
+        {
+            if (key.StartsWith("fps") || key.StartsWith("low")) return "fps";
+            if (key == "ft" || key == "graph") return "ft";
+            if (key == "cpu.name" || key == "gpu.name") return "nombres";
+            if (key.StartsWith("gpu.vram")) return "vram";
+            if (key.StartsWith("cpu.")) return "cpu";
+            if (key.StartsWith("gpu.")) return "gpu";
+            if (key.StartsWith("ram.")) return "ram";
+            return "extra";
+        }
+
+        static readonly Regex VarRx = new Regex(@"\{([a-z0-9.]+)");
+        static readonly Regex TempRx = new Regex(@"[ \t]*\{(?:cpu\.temp|gpu\.temp|gpu\.hot|gpu\.memtemp)\b[^}]*\}(?:°C|°)?");
+
+        public static string Filtrar(string plantilla, List<string> ocultas)
+        {
+            if (ocultas.Count == 0) return plantilla;
+            List<string> r = new List<string>();
+            foreach (string linea in plantilla.Replace("\r\n", "\n").Split('\n'))
+            {
+                string l = ocultas.Contains("temp") ? TempRx.Replace(linea, "") : linea;
+                bool habia = VarRx.IsMatch(linea), queda = false, fuera = false;
+                foreach (Match m in VarRx.Matches(l)) { queda = true; if (ocultas.Contains(CatDe(m.Groups[1].Value))) fuera = true; }
+                if (!fuera && !(habia && !queda)) r.Add(l);
+            }
+            return string.Join("\n", r.ToArray());
+        }
+
         public static string FmtDe(string key)
         {
             foreach (OvVar v in Vars) if (v.Key == key) return v.Fmt;
@@ -116,7 +153,6 @@ namespace Xuca
     {
         public bool Activo = true;
         public bool SoloFrente = true;      // false: se queda visible mientras el juego este abierto (para capturarlo con OBS)
-        public bool Benchmark = false;      // modo benchmark: registra cada partida y al cerrar el juego deja un resumen (Bench.cs)
         public List<string> Procs = new List<string>();
         public string Fuente = "Consolas";
         public float Tam = 11;
@@ -131,6 +167,7 @@ namespace Xuca
         public string Plantilla = OvCat.Defecto;
         public int Borde = 1;               // reborde del texto en px, 0..6 (0 = sin reborde)
         public int ColorBorde = Color.FromArgb(0, 0, 0).ToArgb();
+        public List<string> Ocultas = new List<string>();   // categorias apagadas (OvCat.CatClaves); vacio = se ve toda la plantilla
 
         public static OvCfg Cargar(string arch)
         {
@@ -152,7 +189,6 @@ namespace Xuca
                 {
                     case "activo": Activo = v.Trim() != "0"; break;
                     case "solofrente": SoloFrente = v.Trim() != "0"; break;
-                    case "benchmark": if (conProcs) Benchmark = v.Trim() == "1"; break;
                     case "procs": if (conProcs) { Procs.Clear(); foreach (string p in v.Split('|')) if (p.Trim().Length > 0) Procs.Add(p.Trim()); } break;
                     case "fuente": if (v.Trim().Length > 0) Fuente = v.Trim(); break;
                     case "tam": if (float.TryParse(v.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out f) && f >= 6 && f <= 72) Tam = f; break;
@@ -168,6 +204,7 @@ namespace Xuca
                     case "plantilla": Plantilla = OvCat.Migrar(v.Replace('↵', '\n')); break;
                     case "borde": if (int.TryParse(v.Trim(), out n)) Borde = Math.Max(0, Math.Min(6, n)); break;
                     case "colorborde": if (int.TryParse(v.Trim(), out n)) ColorBorde = n; break;
+                    case "ocultar": Ocultas.Clear(); foreach (string p in v.Split('|')) if (Array.IndexOf(OvCat.CatClaves, p.Trim()) >= 0) Ocultas.Add(p.Trim()); break;
                 }
             }
         }
@@ -177,7 +214,6 @@ namespace Xuca
             List<string> l = new List<string>();
             l.Add("activo=" + (Activo ? "1" : "0"));
             l.Add("solofrente=" + (SoloFrente ? "1" : "0"));
-            if (conProcs) l.Add("benchmark=" + (Benchmark ? "1" : "0"));
             if (conProcs) l.Add("procs=" + string.Join("|", Procs.ToArray()));
             l.Add("fuente=" + Fuente);
             l.Add("tam=" + Tam.ToString(CultureInfo.InvariantCulture));
@@ -192,6 +228,7 @@ namespace Xuca
             l.Add("borde=" + Borde);
             l.Add("colorborde=" + ColorBorde);
             l.Add("tecla=" + Tecla);
+            l.Add("ocultar=" + string.Join("|", Ocultas.ToArray()));
             l.Add("plantilla=" + Plantilla.Replace("\r\n", "\n").Replace('\n', '↵'));
             return l.ToArray();
         }
@@ -258,6 +295,9 @@ namespace Xuca
         readonly double aMs = 1000.0 / Stopwatch.Frequency;   // Stopwatch usa el mismo reloj (QPC) que las marcas de tiempo crudas
 
         public bool Andando;
+        // Grabacion de sesion: los cuadros de TODOS los procesos van al registro (despues se queda con el que estuvo al
+        // frente); el overlay sigue mostrando solo los juegos de su lista
+        public volatile bool Todos;
 
         public static bool Posible { get { return Environment.Is64BitProcess; } }
 
@@ -363,8 +403,10 @@ namespace Xuca
                 if (*(ushort*)(p + 86) >= 8) sc = *(ulong*)(*(IntPtr*)(p + 96));
                 lock (lk)
                 {
-                    if (!pids.Contains(pid)) return;
+                    bool mio = pids.Contains(pid);
+                    if (!mio && !Todos) return;
                     Bench.Cuadro(pid, sc, ms);
+                    if (!mio) return;
                     ultLlegada = Stopwatch.GetTimestamp() * aMs;
                     Dictionary<ulong, List<double>> porSc;
                     if (!frames.TryGetValue(pid, out porSc)) { porSc = new Dictionary<ulong, List<double>>(); frames[pid] = porSc; }
@@ -629,7 +671,7 @@ namespace Xuca
         public void Poner(OvCfg cfg, OvDatos d, Rectangle pantalla)
         {
             Color baseCol = Color.FromArgb(cfg.ColorTexto);
-            List<List<OvRun>> lineas = OvPlantilla.Armar(cfg.Plantilla, d, Color.FromArgb(255, baseCol), cfg.Negrita);
+            List<List<OvRun>> lineas = OvPlantilla.Armar(OvCat.Filtrar(cfg.Plantilla, cfg.Ocultas), d, Color.FromArgb(255, baseCol), cfg.Negrita);
 
             Dictionary<string, Font> fuentes = new Dictionary<string, Font>();
             using (Bitmap medir = new Bitmap(1, 1, PixelFormat.Format32bppPArgb))
@@ -859,7 +901,6 @@ namespace Xuca
             if (guardar) { try { File.WriteAllLines(arch, cfg.Texto(true)); } catch { } }
             if (tecla != null) tecla.Poner(cfg.Tecla);
             bool vigilar = cfg.Activo && cfg.Procs.Count > 0;
-            if (!cfg.Benchmark && Bench.Corriendo) Bench.Terminar(Path.GetDirectoryName(arch));   // se apago el modo a mitad de partida
             tDetectar.Enabled = vigilar;
             if (!vigilar) Parar();
             else Detectar();
@@ -893,36 +934,74 @@ namespace Xuca
             pidsJuego = pids;
             if (pids.Count == 0) { Parar(); return; }
             if (etw == null) etw = new OvEtw();
-            bool fpsOk = etw.Andando || etw.Iniciar();
+            if (!etw.Andando) etw.Iniciar();
             etw.Procesos(pids);
             if (!sensoresOn) IniciarSensores();
             tRefrescar.Enabled = true;
-
-            // Modo benchmark: la corrida empieza cuando se abre el juego y se toma una muestra de sensores por segundo
-            if (cfg.Benchmark)
-            {
-                if (!Bench.Corriendo)
-                {
-                    Bench.Motivo = !OvEtw.Posible ? Modulo.T("Hace falta Windows de 64 bits.", "64-bit Windows is required.")
-                        : !fpsOk ? Modulo.T("Windows no dejó abrir la sesión de eventos (ETW) que mide los FPS.", "Windows did not allow opening the event session (ETW) that measures FPS.") : "";
-                    string nom = ""; foreach (string n in pidNombre.Values) { nom = n; break; }
-                    Bench.Empezar(nom);
-                }
-                Lectura l; lock (lkSens) { l = ultima; }
-                IntPtr fg = GetForegroundWindow(); uint fpid = 0;
-                if (fg != IntPtr.Zero) GetWindowThreadProcessId(fg, out fpid);
-                Bench.Muestra(l, pids.Contains(fpid));
-            }
         }
 
         static void Parar()
         {
             tRefrescar.Enabled = prueba;
-            if (Bench.Corriendo) Bench.Terminar(Path.GetDirectoryName(arch));
-            if (etw != null && etw.Andando) etw.Parar();
-            PararSensores();
             fpsMin = fpsMax = fpsSuma = 0; fpsMuestras = 0;
             if (form != null && !prueba) form.Hide();
+            if (sesion) return;   // la grabacion de sesion sigue usando la sesion ETW y los sensores
+            if (etw != null && etw.Andando) etw.Parar();
+            PararSensores();
+        }
+
+        // ---------- Grabacion de sesion (pestaña Sesión) ----------
+        static bool sesion;
+        static DateTime finSesion;
+        static System.Windows.Forms.Timer tSesion;
+        static uint pidAnt; static string nomAnt, rutaAnt;
+
+        public static bool Grabando { get { return sesion; } }
+        public static TimeSpan Falta { get { TimeSpan t = finSesion - DateTime.Now; return sesion && t > TimeSpan.Zero ? t : TimeSpan.Zero; } }
+
+        // Empieza a grabar (null si arranco; si no, el motivo)
+        public static string GrabarSesion(int segundos)
+        {
+            if (sesion) return null;
+            if (arch == null) return Modulo.T("El overlay de rendimiento no pudo arrancar en este Windows: la grabación de sesión usa lo mismo.", "The performance overlay could not start on this Windows: session recording uses the same thing.");
+            if (etw == null) etw = new OvEtw();
+            bool fpsOk = etw.Andando || etw.Iniciar();
+            etw.Todos = true;
+            if (!sensoresOn) IniciarSensores();
+            Bench.Motivo = !OvEtw.Posible ? Modulo.T("Hace falta Windows de 64 bits.", "64-bit Windows is required.")
+                : !fpsOk ? Modulo.T("Windows no dejó abrir la sesión de eventos (ETW) que mide los FPS.", "Windows did not allow opening the event session (ETW) that measures FPS.")
+                : Modulo.T("Lo que estuvo al frente no presentó cuadros por DirectX 9 a 12 (puede ser Vulkan, OpenGL o una app de escritorio sin animación).", "Whatever was in front did not present frames through DirectX 9 to 12 (it may be Vulkan, OpenGL or a static desktop app).");
+            Bench.Empezar("");
+            sesion = true; pidAnt = 0;
+            finSesion = DateTime.Now.AddSeconds(segundos);
+            tSesion = new System.Windows.Forms.Timer(); tSesion.Interval = 1000;
+            tSesion.Tick += delegate { MuestraSesion(); if (DateTime.Now >= finSesion) TerminarSesion(); };
+            tSesion.Start();
+            return null;
+        }
+
+        static void MuestraSesion()
+        {
+            IntPtr fg = GetForegroundWindow(); uint fpid = 0;
+            if (fg != IntPtr.Zero) GetWindowThreadProcessId(fg, out fpid);
+            if (fpid != pidAnt)
+            {
+                pidAnt = fpid; nomAnt = null; rutaAnt = null;
+                try { using (Process p = Process.GetProcessById((int)fpid)) { nomAnt = p.ProcessName; try { rutaAnt = p.MainModule.FileName; } catch { } } } catch { }
+            }
+            Lectura l; lock (lkSens) { l = ultima; }
+            Bench.Muestra(l, MonitorPC.Instancia != null && MonitorPC.Instancia.Activo ? MonitorPC.Instancia.Ultima : null, true, fpid, nomAnt, rutaAnt);
+        }
+
+        // Termina la grabacion (se acabo el tiempo, el usuario la corto o se cierra la app) y arma el reporte
+        public static void TerminarSesion()
+        {
+            if (!sesion) return;
+            sesion = false;
+            if (tSesion != null) { tSesion.Dispose(); tSesion = null; }
+            if (etw != null) etw.Todos = false;
+            if (Bench.Corriendo) Bench.Terminar(Path.GetDirectoryName(arch));
+            if (pidsJuego.Count == 0) Parar();   // sin juego del overlay abierto, se apagan ETW y sensores
         }
 
         static void IniciarSensores()
@@ -932,15 +1011,15 @@ namespace Xuca
             {
                 Sensores s = null;
                 try { s = new Sensores(); s.Abrir(); } catch { s = null; }
-                while (sensoresOn && s != null)
+                // Sin PawnIO la libreria no da MHz ni temperatura del CPU: los completa Windows (SinDriver.cs), aunque la libreria no cargue
+                CpuWindows cw = new CpuWindows(); cw.Abrir();
+                while (sensoresOn)
                 {
-                    try { Lectura l = new Lectura(); s.Leer(l); MonitorPC.LeerRam(l);
-                        // Sin PawnIO la libreria no da MHz ni uso de CPU: se toman los que calcula Windows en el monitor de PC (si esta andando)
-                        Lectura pcL = MonitorPC.Instancia != null ? MonitorPC.Instancia.Ultima : null;
-                        if (pcL != null) { if (!l.CpuClockProm.HasValue) l.CpuClockProm = pcL.CpuClockProm; if (!l.CpuLoad.HasValue) l.CpuLoad = pcL.CpuLoad; }
+                    try { Lectura l = new Lectura(); if (s != null) s.Leer(l); MonitorPC.LeerRam(l); cw.Leer(l, 0);
                         lock (lkSens) { ultima = l; } } catch { }
                     for (int i = 0; i < 10 && sensoresOn; i++) Thread.Sleep(100);
                 }
+                cw.Cerrar();
                 if (s != null) { try { s.Cerrar(); } catch { } }
             });
             hiloSens.IsBackground = true;
@@ -1008,6 +1087,8 @@ namespace Xuca
                 if (l.CpuNombre.Length > 0) datos.S["cpu.name"] = l.CpuNombre;
                 if (l.GpuNombre.Length > 0) datos.S["gpu.name"] = l.GpuNombre;
                 Num(datos, "cpu.load", l.CpuLoad); Num(datos, "cpu.temp", l.CpuTemp); Num(datos, "cpu.power", l.CpuPower);
+                // La zona termica ACPI es aproximada: se marca con "~" (sin temperatura ni vatios queda "--", no se inventa)
+                if (l.CpuTemp.HasValue && l.CpuTempFuente == "ACPI") datos.S["cpu.temp"] = "~" + Math.Round(l.CpuTemp.Value).ToString(CultureInfo.InvariantCulture);
                 Num(datos, "cpu.clock", l.CpuClockProm); Num(datos, "cpu.volt", l.CpuVolt);
                 Num(datos, "gpu.load", l.GpuLoad); Num(datos, "gpu.temp", l.GpuTemp); Num(datos, "gpu.hot", l.GpuHot); Num(datos, "gpu.memtemp", l.GpuMemTemp);
                 Num(datos, "gpu.power", l.GpuPower); Num(datos, "gpu.clock", l.GpuClock); Num(datos, "gpu.memclock", l.GpuMemClock); Num(datos, "gpu.volt", l.GpuVolt);
@@ -1028,7 +1109,7 @@ namespace Xuca
 
         public static void Detener()
         {
-            if (Bench.Corriendo && arch != null) Bench.Terminar(Path.GetDirectoryName(arch));   // se cierra la app con el juego abierto: se guarda igual
+            if (sesion) TerminarSesion();
             if (tDetectar != null) { tDetectar.Dispose(); tDetectar = null; }
             if (tRefrescar != null) { tRefrescar.Dispose(); tRefrescar = null; }
             if (etw != null) { etw.Parar(); etw = null; }
@@ -1046,7 +1127,8 @@ namespace Xuca
 
         OvCfg c;
         bool cargando;
-        CheckBox chkActivo, chkNegrita, chkFrente, chkBench;
+        CheckBox chkActivo, chkNegrita, chkFrente;
+        CheckBox[] chkCat;
         ListBox lista;
         ComboBox cmbProc, cmbEsq, cmbTecla, cmbVar, cmbPre;
         TextBox txt;
@@ -1085,10 +1167,6 @@ namespace Xuca
             chkFrente = new CheckBox(); chkFrente.AutoSize = true; chkFrente.MaximumSize = new Size(540, 0);
             chkFrente.Text = T("Ocultarlo cuando el juego no está al frente (destildalo para capturarlo con OBS: Captura de ventana > \"Pulso Overlay\")", "Hide it when the game isn't in front (untick it to capture it with OBS: Window Capture > \"Pulso Overlay\")");
             chkFrente.CheckedChanged += Cambio; f.Controls.Add(chkFrente);
-            chkBench = new CheckBox(); chkBench.AutoSize = true; chkBench.MaximumSize = new Size(540, 0);
-            chkBench.Text = T("Modo benchmark: registrar cada partida de estos juegos y, al cerrar el juego, dejar en Rendimiento un resumen (FPS, 1 % y 0.1 % low, sensores y problemas encontrados). Se guarda en Documentos\\Pulso\\benchmarks.",
-                              "Benchmark mode: record every session of these games and, when the game closes, leave a summary in Performance (FPS, 1% and 0.1% low, sensors and problems found). Saved in Documents\\Pulso\\benchmarks.");
-            chkBench.CheckedChanged += Cambio; f.Controls.Add(chkBench);
 
             // Juegos
             GroupBox gp = Grupo(T("Juegos (nombre del proceso, sin .exe)", "Games (process name, without .exe)"), 150, f);
@@ -1148,6 +1226,16 @@ namespace Xuca
                 "Escribí lo que quieras y poné las variables entre llaves: {gpu.name}, {fps}, {gpu.temp}...  Color: <c=FF0000>texto</c>   Tamaño: <s=150>texto</s> (150 %)   Negrita: <b>texto</b>   Formato: {gpu.power:0.0}   Alerta por valor: {gpu.temp!85,90} (naranja desde 85, rojo desde 90); en FPS al revés: {fps!<60,30}   Gráfico: {graph:260x40}",
                 "Write whatever you want and put variables in braces: {gpu.name}, {fps}, {gpu.temp}...  Color: <c=FF0000>text</c>   Size: <s=150>text</s> (150 %)   Bold: <b>text</b>   Format: {gpu.power:0.0}   Alert by value: {gpu.temp!85,90} (orange from 85, red from 90); for FPS reversed: {fps!<60,30}   Graph: {graph:260x40}");
             gt.Controls.Add(ayuda);
+
+            // Categorias: cada una se prende o se apaga sin tocar la plantilla (se guarda en overlay.txt, clave "ocultar")
+            GroupBox gc = Grupo(T("Qué categorías mostrar", "Which categories to show"), 22 + 26 * ((OvCat.CatClaves.Length + 2) / 3) + 8, f);
+            chkCat = new CheckBox[OvCat.CatClaves.Length];
+            for (int i = 0; i < chkCat.Length; i++)
+            {
+                chkCat[i] = new CheckBox(); chkCat[i].Text = T(OvCat.CatEs[i], OvCat.CatEn[i]);
+                chkCat[i].SetBounds(10 + (i % 3) * 172, 22 + (i / 3) * 26, 168, 24);
+                chkCat[i].CheckedChanged += Cambio; gc.Controls.Add(chkCat[i]);
+            }
 
             // Estilo
             GroupBox ge = Grupo(T("Estilo y posición", "Style and position"), 215, f);
@@ -1278,7 +1366,7 @@ namespace Xuca
             cargando = true;
             chkActivo.Checked = c.Activo;
             chkFrente.Checked = c.SoloFrente;
-            chkBench.Checked = c.Benchmark;
+            for (int i = 0; i < chkCat.Length; i++) chkCat[i].Checked = !c.Ocultas.Contains(OvCat.CatClaves[i]);
             lista.Items.Clear();
             foreach (string p in c.Procs) lista.Items.Add(p);
             txt.Text = c.Plantilla.Replace("\r\n", "\n").Replace("\n", "\r\n");
@@ -1316,7 +1404,8 @@ namespace Xuca
             if (cargando) return;
             c.Activo = chkActivo.Checked;
             c.SoloFrente = chkFrente.Checked;
-            c.Benchmark = chkBench.Checked;
+            c.Ocultas.Clear();
+            for (int i = 0; i < chkCat.Length; i++) if (!chkCat[i].Checked) c.Ocultas.Add(OvCat.CatClaves[i]);
             c.Procs.Clear();
             foreach (object p in lista.Items) c.Procs.Add((string)p);
             c.Plantilla = txt.Text.Replace("\r\n", "\n");

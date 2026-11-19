@@ -1,4 +1,4 @@
-// Pulso: vigila la red, los USB, el rendimiento, los errores y el hardware desde la bandeja (al lado del reloj).
+// Pulso: monitoreo integral de la PC desde la bandeja (al lado del reloj): red, USB, rendimiento, errores, hardware y grabación de sesiones.
 // Cada parte (Red y USB) es un "modulo" que se puede prender o apagar; apagado no gasta nada.
 // La ventana solo existe mientras esta abierta: al cerrarla o minimizarla se destruye y se libera la memoria,
 // y lo detectado queda guardado en el historial.
@@ -113,7 +113,7 @@ namespace Xuca
             App.Cambio(this);
         }
 
-        // Para que otra parte de la app (el modo benchmark) deje un aviso en esta pestaña
+        // Para que otra parte de la app (la grabacion de sesion) deje un aviso en esta pestaña
         internal void AgregarAviso(string texto, int suma) { Agregar(texto, suma); }
 
         // La primera linea del ultimo aviso (su titulo), o null
@@ -232,7 +232,7 @@ namespace Xuca
             return Environment.OSVersion.Version;
         }
         internal static readonly Version WinVer = LeerVersion();
-        // En 7, 8 y 8.1 Pulso anda recortado: sin pestaña PC (sensores con PawnIO) ni overlay de FPS / modo benchmark (ETW).
+        // En 7, 8 y 8.1 Pulso anda recortado: sin las pestañas de hardware (sensores con PawnIO) ni overlay de rendimiento / grabacion de sesion (ETW).
         internal static readonly bool Win10 = WinVer.Major >= 10;
         internal static string SoloWin10(string que_es, string que_en)
         {
@@ -298,12 +298,22 @@ namespace Xuca
             modulos.Add(new MonitorUsb());
             modulos.Add(new MonitorRend());
             modulos.Add(new MonitorErrores());
+            // Hardware: CPU, GPU, Memoria y Discos son 4 pestañas que leen de un mismo monitor (MonitorPC), que no se muestra.
             // Si falta alguna dll de la carpeta "lib" (sensores), que no se caiga toda la app: se guarda el error y
-            // se sigue sin la pestaña PC.
-            // En Windows 7/8/8.1 la pestaña queda, pero solo explica por que no esta (el driver PawnIO es para Windows 10 u 11)
-            Modulo pc = Win10 ? CrearModuloPC() : new ModuloNoDisponible("pc", "PC",
-                "La pestaña PC (temperaturas, consumo, frecuencias y estado del hardware)", "The PC tab (temperatures, power, clocks and hardware health)");
-            if (pc != null) modulos.Add(pc);
+            // se sigue sin esas pestañas.
+            // En Windows 7/8/8.1 queda una sola pestaña que explica por que no estan (el driver PawnIO es para Windows 10 u 11)
+            if (Win10)
+            {
+                MonitorPC pc = (MonitorPC)CrearModuloPC();
+                if (pc != null)
+                {
+                    pc.App = this; pc.LogF = Path.Combine(Datos, pc.RegistroArch); pc.HistF = Path.Combine(Datos, pc.HistArch);
+                    modulos.AddRange(pc.Pestanas);
+                }
+            }
+            else modulos.Add(new ModuloNoDisponible("pc", "Hardware",
+                "Las pestañas CPU, GPU, Memoria y Discos (temperaturas, consumo, frecuencias y estado del hardware)", "The CPU, GPU, Memory and Drives tabs (temperatures, power, clocks and hardware health)"));
+            modulos.Add(new MonitorSesion());
             foreach (Modulo m in modulos)
             {
                 m.App = this;
@@ -346,28 +356,30 @@ namespace Xuca
             timerTema.Tick += delegate { if (fv != null && tema == "sistema" && EsOscuro() != oscuroAhora) AplicarTema(); };
 
             // "Iniciar con Windows": la tarea de antes del cambio de nombre (XucaMonitor_Inicio) pasa a Pulso_Inicio. La vieja
-            // se borra recien cuando la nueva quedo creada, asi nunca se pierde. Se recrea siempre: si el .exe cambio de
-            // carpeta, la tarea se corrige sola.
-            bool tareaVieja = Schtasks("/query /tn \"" + TareaVieja + "\"") == 0;
-            if (tareaVieja || TareaExiste())
+            // se borra recien cuando la nueva quedo creada, asi nunca se pierde. Solo se reescribe si hace falta (la vieja
+            // existe o el .exe cambio de carpeta): reescribirla en cada arranque es lo que Defender marcaba (ver CarpetaTareas).
+            bool tareaVieja = TareaComando(TareaVieja) != null;
+            string cmd = TareaComando(TareaNombre);
+            if (tareaVieja || (cmd != null && !string.Equals(cmd, TareaExe, StringComparison.OrdinalIgnoreCase)))
             {
-                try { TareaCrear(); } catch { }
-                if (tareaVieja && TareaExiste()) Schtasks("/delete /tn \"" + TareaVieja + "\" /f");
+                TareaCrear();
+                if (tareaVieja && TareaExiste()) TareaBorrar(TareaVieja);
             }
 
             foreach (Modulo m in modulos)
             {
                 string on;
-                bool prender = !aj.TryGetValue(m.Clave, out on) || on != "0";
-                if (prender) m.Prender(true);
+                // Las pestañas de hardware nuevas heredan el "Activado" de la pestaña PC que reemplazan (hasta la 1.0.3)
+                if (!aj.TryGetValue(m.Clave, out on) && m is PcPestana) aj.TryGetValue("pc", out on);
+                if (on != "0") m.Prender(true);
             }
-            // El resumen de cada corrida del modo benchmark queda en Rendimiento y avisa con un globito en la bandeja
+            // El reporte de cada grabacion de sesion queda en la pestaña Sesión y avisa con un globito en la bandeja
             Bench.Listo = delegate (string largo, string corto)
             {
-                foreach (Modulo m in modulos) if (m is MonitorRend) { m.AgregarAviso(largo, 1); break; }
-                if (corto != null) EnUi(delegate { try { if (ni != null && ni.Visible) ni.ShowBalloonTip(10000, Nombre + " · Benchmark", corto, ToolTipIcon.Info); } catch { } });
+                foreach (Modulo m in modulos) if (m is MonitorSesion) { m.AgregarAviso(largo, 1); break; }
+                if (corto != null) EnUi(delegate { try { if (ni != null && ni.Visible) ni.ShowBalloonTip(10000, Nombre + T(" · Sesión", " · Session"), corto, ToolTipIcon.Info); } catch { } });
             };
-            // El overlay de FPS (y el modo benchmark) usa eventos de presentacion de Windows 10 u 11
+            // El overlay de rendimiento (y la grabacion de sesion) usa eventos de presentacion de Windows 10 u 11
             if (Win10) { try { OvMgr.Iniciar(Datos); } catch (Exception ex) { GuardarCrash(ex); } }
             ActualizarTextos();
             if (!oculto) MostrarVentana(); else Recortar();
@@ -406,7 +418,7 @@ namespace Xuca
         // Un modulo agrego algo: se actualiza la ventana (si esta abierta) y el texto de la bandeja
         public void Cambio(Modulo m)
         {
-            // Un aviso de Rendimiento o de Red en medio de una corrida del modo benchmark: pudo ensuciar la prueba
+            // Un aviso de Rendimiento o de Red en medio de una grabacion de sesion: pudo ensuciar la medicion
             if (Bench.Corriendo && (m is MonitorRend || m is MonitorRed)) Bench.Evento(m.Nombre + ": " + m.UltimoTitulo());
             EnUi(delegate
             {
@@ -497,30 +509,34 @@ namespace Xuca
 
         string UltimoError = "";
 
-        int Schtasks(string args)
+        // Se maneja con la API del Programador de tareas (COM "Schedule.Service"), sin abrir schtasks.exe ni escribir un XML
+        // en %TEMP%. Hasta la 1.0.3 se hacia con schtasks y se recreaba en CADA arranque: Defender lo marcaba como
+        // Behavior:Win32/Persistence.A!ml y Execution.A!ml (un .exe sin firma que se reinstala al inicio una y otra vez)
+        // y borraba Pulso. Ahora solo se escribe cuando el usuario la prende o cuando el .exe cambio de carpeta.
+        static object Com(object o, string metodo, params object[] args) { return o.GetType().InvokeMember(metodo, BindingFlags.InvokeMethod, null, o, args); }
+        static object CarpetaTareas()
+        {
+            object svc = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service"));
+            Com(svc, "Connect");
+            return Com(svc, "GetFolder", "\\");
+        }
+
+        // El comando que tiene la tarea guardada, o null si no existe
+        static string TareaComando(string nombre)
         {
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo("schtasks.exe", args);
-                psi.UseShellExecute = false;
-                psi.CreateNoWindow = true;
-                psi.RedirectStandardOutput = true;
-                psi.RedirectStandardError = true;
-                using (Process p = Process.Start(psi))
-                {
-                    string err = p.StandardError.ReadToEnd() + p.StandardOutput.ReadToEnd();
-                    p.WaitForExit(5000);
-                    UltimoError = err.Trim();
-                    return p.ExitCode;
-                }
+                object t = Com(CarpetaTareas(), "GetTask", nombre);
+                string xml = (string)t.GetType().InvokeMember("Xml", BindingFlags.GetProperty, null, t, null);
+                System.Xml.XmlDocument d = new System.Xml.XmlDocument();
+                d.LoadXml(xml);
+                System.Xml.XmlNodeList c = d.GetElementsByTagName("Command");
+                return c.Count > 0 ? Environment.ExpandEnvironmentVariables(c[0].InnerText.Trim('"')) : "";
             }
-            catch { return -1; }
+            catch { return null; }
         }
 
-        bool TareaExiste()
-        {
-            return Schtasks("/query /tn \"" + TareaNombre + "\"") == 0;
-        }
+        bool TareaExiste() { return TareaComando(TareaNombre) != null; }
 
         // Se crea con un XML propio porque la tarea que arma "schtasks /sc onlogon" trae dos trampas de Windows:
         // no arranca si la notebook esta a bateria, y MATA el programa a las 72 horas de andar.
@@ -548,28 +564,29 @@ namespace Xuca
                 "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n" +
                 "    <Priority>7</Priority>\r\n" +
                 "  </Settings>\r\n" +
-                "  <Actions Context=\"Author\"><Exec><Command>" + Xml(Exe) + "</Command><Arguments>/inicio</Arguments><WorkingDirectory>" + Xml(Dir) + "</WorkingDirectory></Exec></Actions>\r\n" +
+                "  <Actions Context=\"Author\"><Exec><Command>" + Xml(TareaExe) + "</Command><Arguments>/inicio</Arguments><WorkingDirectory>" + Xml(Path.GetDirectoryName(TareaExe)) + "</WorkingDirectory></Exec></Actions>\r\n" +
                 "</Task>\r\n";
-            string arch = Path.Combine(Path.GetTempPath(), "Pulso_tarea.xml");
-            try
-            {
-                File.WriteAllText(arch, xml, Encoding.Unicode);
-                if (Schtasks("/create /tn \"" + TareaNombre + "\" /xml \"" + arch + "\" /f") != 0)
-                {
-                    // Si el XML no se pudo usar, por lo menos la forma simple
-                    string trValor = "\\\"" + Exe + "\\\" /inicio";
-                    Schtasks("/create /tn \"" + TareaNombre + "\" /tr \"" + trValor + "\" /sc onlogon /rl highest /f");
-                }
-            }
-            finally { try { File.Delete(arch); } catch { } }
+            // 6 = crear o actualizar; 3 = con el token de la sesion interactiva (el usuario y el nivel salen del XML)
+            try { Com(CarpetaTareas(), "RegisterTask", TareaNombre, xml, 6, null, null, 3, null); UltimoError = ""; }
+            catch (Exception ex) { UltimoError = (ex.InnerException ?? ex).Message; }
         }
 
         static string Xml(string s) { return System.Security.SecurityElement.Escape(s ?? ""); }
 
-        void TareaBorrar()
+        static void TareaBorrar(string nombre) { try { Com(CarpetaTareas(), "DeleteTask", nombre, 0); } catch { } }
+        void TareaBorrar() { TareaBorrar(TareaVieja); TareaBorrar(TareaNombre); }
+
+        // Instalada desde la Microsoft Store (MSIX) la carpeta del .exe cambia con cada actualizacion: la tarea apunta al
+        // alias "Pulso.exe" que Windows deja fijo en %LOCALAPPDATA%\Microsoft\WindowsApps.
+        string TareaExe { get { return Empaquetada ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft\\WindowsApps\\Pulso.exe") : Exe; } }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern int GetCurrentPackageFullName(ref int len, StringBuilder nombre);
+        // true si corre instalada como paquete MSIX (Microsoft Store). En Windows 7 la funcion no existe: false.
+        internal static readonly bool Empaquetada = EsPaquete();
+        static bool EsPaquete()
         {
-            Schtasks("/delete /tn \"" + TareaVieja + "\" /f");
-            Schtasks("/delete /tn \"" + TareaNombre + "\" /f");
+            try { int n = 0; return GetCurrentPackageFullName(ref n, null) != 15700; }   // 15700 = APPMODEL_ERROR_NO_PACKAGE
+            catch { return false; }
         }
 
         // ---------- Carpeta de datos ----------
@@ -696,7 +713,7 @@ namespace Xuca
                 bEsc.Text = T("Acceso directo en el escritorio", "Desktop shortcut");
                 bTema.Text = TextoTema();
                 bIdioma.Text = T("English", "Español");
-                bOver.Text = T("Overlay de FPS", "FPS overlay");
+                bOver.Text = T("Overlay de rendimiento", "Performance overlay");
                 bKofi.Text = T("♥ Apoyar en Ko-fi", "♥ Support on Ko-fi");
                 chkActivo.Text = T("Activado", "Enabled");
                 chkActivo.Checked = actual.Activo;
@@ -855,7 +872,7 @@ namespace Xuca
             bOver = Boton(arriba, delegate
             {
                 if (Win10) OvAjustes.Mostrar();
-                else MessageBox.Show(SoloWin10("El overlay de FPS y el modo benchmark", "The FPS overlay and benchmark mode"), Nombre, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                else MessageBox.Show(SoloWin10("El overlay de rendimiento y la grabación de sesión", "The performance overlay and session recording"), Nombre, MessageBoxButtons.OK, MessageBoxIcon.Information);
             });
 
             // Ko-fi: celeste fijo, igual que en el Xuca OPtimizer (no cambia con el tema)
@@ -870,8 +887,10 @@ namespace Xuca
             // Segunda fila: pestañas Red / USB y lo de la pestaña elegida
             fila2 = new FlowLayoutPanel();
             fila2.Dock = DockStyle.Top;
-            fila2.Height = (int)(40 * k);
-            fila2.Padding = new Padding((int)(10 * k), (int)(4 * k), (int)(10 * k), 0);
+            // Son 9 pestañas: en una ventana angosta pasan a una segunda linea en vez de quedar cortadas
+            fila2.AutoSize = true;
+            fila2.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            fila2.Padding = new Padding((int)(10 * k), (int)(4 * k), (int)(10 * k), (int)(6 * k));
             pestanas.Clear();
             foreach (Modulo m in modulos)
             {
@@ -879,12 +898,11 @@ namespace Xuca
                 Button p = Boton(fila2, delegate { Elegir(mm); });
                 p.Font = new Font("Segoe UI Semibold", 9.5f);
                 p.Padding = new Padding((int)(8 * k), 0, (int)(8 * k), 0);
+                p.Margin = new Padding(0, 0, (int)(6 * k), (int)(4 * k));
                 pestanas[m] = p;
             }
-            Label sep = new Label();
-            sep.Width = (int)(18 * k);
-            sep.Height = 1;
-            fila2.Controls.Add(sep);
+            // Lo de la pestaña elegida empieza siempre en su propia linea, debajo de las pestañas
+            fila2.SetFlowBreak(pestanas[modulos[modulos.Count - 1]], true);
             chkActivo = new CheckBox();
             chkActivo.AutoSize = true;
             chkActivo.Margin = new Padding(0, 5, 14, 0);

@@ -1,6 +1,7 @@
-// Pulso: modo benchmark. Registra una corrida (desde que se abre un juego de la lista del overlay hasta que se cierra),
-// y al terminar arma un resumen con los problemas que encontro en los datos. Cada corrida queda en Documentos\Pulso\benchmarks
-// (un .txt legible por corrida y una fila en benchmarks.csv para comparar), y el resumen aparece en la pestaña Rendimiento.
+// Pulso: grabacion de sesion. Registra el tiempo que eligio el usuario (con lo que tenga al frente) y al terminar arma un
+// resumen con los problemas que encontro en los datos. Cada sesion queda en Documentos\Pulso\benchmarks (un .txt legible y
+// una fila en benchmarks.csv para comparar con la anterior de la misma app); el reporte aparece en la pestaña Sesión, con el
+// analisis de cuello de botella y el diagnostico (Sesion.cs). (El "modo benchmark" del overlay, hasta la 1.0.3, se quito: esto lo reemplaza.)
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -22,17 +23,17 @@ namespace Xuca
         const double CaidaReloj = 0.85;             // throttling: la frecuencia cae debajo del 85 % de la que logra cargado y fresco
         const int MinMuestrasThrottle = 3;          // ...durante al menos 3 muestras (segundos)
         const float CargaAlta = 80f;                // "cargado": uso de 80 % o mas
-        const float GpuTope = 95f;                  // GPU al 95 % o mas en promedio: la GPU es el limite (lo normal en juegos)
-        const float GpuEsperando = 80f;             // GPU por debajo del 80 % en promedio...
-        const float NucleoTope = 90f;               // ...con el nucleo mas cargado del CPU al 90 % o mas: el CPU limita
         const float RamLlena = 90f;                 // RAM al 90 % o mas en algun momento: puede empezar a usar el disco como memoria
 
-        class Punto { public float? CpuT, CpuU, CpuMhz, CpuW, GpuT, GpuU, GpuMhz, GpuW, NucleoMax; public float Ram = -1; public int Tj; public bool Frente; }
+        internal class Punto { public float? CpuT, CpuU, CpuMhz, CpuW, GpuT, GpuU, GpuMhz, GpuW, NucleoMax, VramMB, VramTotalMB, Paginas, PagUso, CpuLim; public float Ram = -1; public double RamGB, RamTotalGB; public int Tj; public bool Frente, CpuTAprox, CpuBajoNivel; }
 
         static readonly object lk = new object();
         static bool corriendo;
         static string juego = "";
         static DateTime inicio;
+        // Cuantas muestras estuvo al frente cada proceso (sus FPS son los que se resumen), su nombre y su .exe
+        static Dictionary<uint, int> frentes;
+        static Dictionary<uint, string> nombres, rutas;
         // pid -> swapchain -> frametimes (ms); y el ultimo tiempo de cada una
         static Dictionary<uint, Dictionary<ulong, List<float>>> cuadros;
         static Dictionary<uint, Dictionary<ulong, double>> ultimos;
@@ -54,6 +55,7 @@ namespace Xuca
                 cuadros = new Dictionary<uint, Dictionary<ulong, List<float>>>();
                 ultimos = new Dictionary<uint, Dictionary<ulong, double>>();
                 muestras = new List<Punto>(); eventos = new List<string>();
+                frentes = new Dictionary<uint, int>(); nombres = new Dictionary<uint, string>(); rutas = new Dictionary<uint, string>();
                 cpuNombre = gpuNombre = "";
             }
         }
@@ -79,13 +81,16 @@ namespace Xuca
             }
         }
 
-        // Una vez por segundo mientras el juego esta abierto
-        public static void Muestra(Lectura l, bool juegoAlFrente)
+        // Una vez por segundo: sensores, y ademas que proceso estaba al frente y la paginacion (del monitor de hardware, si anda)
+        public static void Muestra(Lectura l, Lectura pc, bool alFrente, uint pidFrente, string nombreFrente, string rutaFrente)
         {
             if (!corriendo || l == null) return;
             Punto m = new Punto();
             m.CpuT = l.CpuTemp; m.CpuU = l.CpuLoad; m.CpuMhz = l.CpuClockProm; m.CpuW = l.CpuPower; m.Tj = l.CpuTjMax;
-            m.GpuT = l.GpuTemp; m.GpuU = l.GpuLoad; m.GpuMhz = l.GpuClock; m.GpuW = l.GpuPower; m.Ram = l.RamUso; m.Frente = juegoAlFrente;
+            m.CpuTAprox = l.CpuTempFuente == "ACPI"; m.CpuBajoNivel = l.CpuBajoNivel; m.CpuLim = l.CpuLimitePct;
+            m.GpuT = l.GpuTemp; m.GpuU = l.GpuLoad; m.GpuMhz = l.GpuClock; m.GpuW = l.GpuPower; m.Ram = l.RamUso; m.Frente = alFrente;
+            m.VramMB = l.GpuVramUsada; m.VramTotalMB = l.GpuVramTotal; m.RamGB = l.RamUsadaGB; m.RamTotalGB = l.RamTotalGB;
+            if (pc != null) { m.Paginas = pc.PaginasSeg; m.PagUso = pc.PaginacionUso; }
             float max = -1; foreach (float x in l.CpuNucleos) if (x > max) max = x;
             if (max >= 0) m.NucleoMax = max;
             lock (lk)
@@ -94,6 +99,12 @@ namespace Xuca
                 muestras.Add(m);
                 if (l.CpuNombre.Length > 0) cpuNombre = l.CpuNombre;
                 if (l.GpuNombre.Length > 0) gpuNombre = l.GpuNombre;
+                if (pidFrente != 0)
+                {
+                    int c; frentes.TryGetValue(pidFrente, out c); frentes[pidFrente] = c + 1;
+                    if (nombreFrente != null) nombres[pidFrente] = nombreFrente;
+                    if (rutaFrente != null) rutas[pidFrente] = rutaFrente;
+                }
             }
         }
 
@@ -104,29 +115,46 @@ namespace Xuca
             lock (lk) { if (corriendo && eventos.Count < 20) eventos.Add(DateTime.Now.ToString("HH:mm:ss") + "  " + titulo); }
         }
 
-        // El juego se cerro (o se apago el overlay): resume, guarda y avisa. Nunca tira error.
+        // Se acabo el tiempo, el usuario la corto o se cierra la app: resume, guarda y avisa. Nunca tira error.
         public static void Terminar(string carpeta)
         {
-            List<float> ft = null; List<Punto> ms; List<string> ev; string jg, cpu, gpu; DateTime ini;
+            List<float> ft = null; List<Punto> ms; List<string> ev; string jg, cpu, gpu, ruta = null; DateTime ini;
             lock (lk)
             {
                 if (!corriendo) return;
                 corriendo = false;
-                foreach (Dictionary<ulong, List<float>> porSc in cuadros.Values)
-                    foreach (List<float> l in porSc.Values) if (ft == null || l.Count > ft.Count) ft = l;   // la swapchain del juego: la que mas cuadros tuvo
+                // Los FPS son los del proceso que mas tiempo estuvo al frente (si presento cuadros)
+                uint elegido = 0; int veces = 0;
+                foreach (KeyValuePair<uint, int> f in frentes) if (f.Value > veces && cuadros.ContainsKey(f.Key)) { elegido = f.Key; veces = f.Value; }
+                foreach (KeyValuePair<uint, Dictionary<ulong, List<float>>> porSc in cuadros)
+                    if (elegido == 0 || porSc.Key == elegido)
+                        foreach (List<float> l in porSc.Value.Values) if (ft == null || l.Count > ft.Count) ft = l;   // la swapchain del juego: la que mas cuadros tuvo
                 ms = muestras; ev = eventos; jg = juego; cpu = cpuNombre; gpu = gpuNombre; ini = inicio;
-                cuadros = null; ultimos = null; muestras = null; eventos = null;
+                if (elegido == 0) foreach (KeyValuePair<uint, int> f in frentes) if (f.Value > veces) { elegido = f.Key; veces = f.Value; }
+                string n; if (nombres.TryGetValue(elegido, out n)) jg = n;
+                rutas.TryGetValue(elegido, out ruta);
+                cuadros = null; ultimos = null; muestras = null; eventos = null; frentes = null; nombres = null; rutas = null;
             }
+            // El diagnostico lee WMI, el visor de eventos y los procesos (1-2 s): fuera del hilo de la ventana
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate { Resumen(jg, ini, ft, ms, ev, cpu, gpu, carpeta, ruta); });
+        }
+
+        static void Resumen(string jg, DateTime ini, List<float> ft, List<Punto> ms, List<string> ev, string cpu, string gpu, string carpeta, string ruta)
+        {
             try
             {
                 double seg = (DateTime.Now - ini).TotalSeconds;
-                if (seg < MinSegundos) return;
-                string[] res = Resumir(jg, ini, seg, ft, ms, ev, cpu, gpu, carpeta);
+                if (seg < MinSegundos)
+                {
+                    if (Listo != null) Listo(T("SESIÓN: se cortó a los " + (int)seg + " s; hacen falta al menos " + MinSegundos + " s para un resumen.", "SESSION: stopped after " + (int)seg + " s; at least " + MinSegundos + " s are needed for a summary."), null);
+                    return;
+                }
+                string[] res = Resumir(jg, ini, seg, ft, ms, ev, cpu, gpu, carpeta, ruta);
                 if (Listo != null) Listo(res[0], res[1]);
             }
             catch (Exception ex)
             {
-                if (Listo != null) Listo(T("BENCHMARK: no se pudo armar el resumen (", "BENCHMARK: could not build the summary (") + ex.Message + ")", null);
+                if (Listo != null) Listo(T("SESIÓN: no se pudo armar el resumen (", "SESSION: could not build the summary (") + ex.Message + ")", null);
             }
         }
 
@@ -162,11 +190,11 @@ namespace Xuca
             return n;
         }
 
-        static string[] Resumir(string jg, DateTime ini, double seg, List<float> todos, List<Punto> todas, List<string> ev, string cpu, string gpu, string carpeta)
+        static string[] Resumir(string jg, DateTime ini, double seg, List<float> todos, List<Punto> todas, List<string> ev, string cpu, string gpu, string carpeta, string ruta)
         {
             CultureInfo inv = CultureInfo.InvariantCulture;
             List<string> L = new List<string>(), problemas = new List<string>(), info = new List<string>();
-            L.Add(T("BENCHMARK: ", "BENCHMARK: ") + jg + " · " + Modulo.Fecha(ini) + " · " + ((int)(seg / 60)) + " min " + ((int)(seg % 60)) + " s");
+            L.Add(T("SESIÓN GRABADA: ", "RECORDED SESSION: ") + (jg != "" ? jg : T("(sin app al frente)", "(no app in front)")) + " · " + Modulo.Fecha(ini) + " · " + ((int)(seg / 60)) + " min " + ((int)(seg % 60)) + " s");
             L.Add("");
 
             // ---- FPS (toda la corrida, sin pausas) ----
@@ -216,16 +244,29 @@ namespace Xuca
 
             L.Add("");
             L.Add(T("SENSORES (promedio / máximo):", "SENSORS (average / max):"));
+            // Lo que no se pudo medir se dice (no se pone "-" como si fuera un dato): sin PawnIO no hay temperatura ni vatios del CPU
+            bool cpuDriver = false, cpuAprox = false; foreach (Punto m in ms) { if (m.CpuBajoNivel) cpuDriver = true; if (m.CpuTAprox && m.CpuT.HasValue) cpuAprox = true; }
+            string sinDriver = T("requiere driver (PawnIO, opcional)", "requires a driver (PawnIO, optional)");
             if (cT.Count + cU.Count + cF.Count + cW.Count > 0)
-                L.Add("  CPU" + (cpu != "" ? " (" + cpu + ")" : "") + ": " + F0(Prom(cT)) + " / " + F0(Max(cT)) + " °C   ·   " + T("uso ", "usage ") + F0(Prom(cU)) + " / " + F0(Max(cU)) + " %   ·   "
-                    + Ghz(Prom(cF)) + "   ·   " + F0(Prom(cW)) + " / " + F0(Max(cW)) + " W" + (nMax.Count > 0 ? T("   ·   núcleo más cargado ", "   ·   busiest core ") + F0(Prom(nMax)) + " %" : ""));
+                L.Add("  CPU" + (cpu != "" ? " (" + cpu + ")" : "") + ": "
+                    + (cT.Count > 0 ? F0(Prom(cT)) + " / " + F0(Max(cT)) + " °C" + (cpuAprox ? T(" (aproximada: zona térmica de Windows)", " (approximate: Windows thermal zone)") : "") : T("temperatura: ", "temperature: ") + (cpuDriver ? T("sin dato", "no data") : sinDriver))
+                    + "   ·   " + T("uso ", "usage ") + F0(Prom(cU)) + " / " + F0(Max(cU)) + " %   ·   "
+                    + (cF.Count > 0 ? Ghz(Prom(cF)) : T("frecuencia sin dato", "no clock data")) + "   ·   "
+                    + (cW.Count > 0 ? F0(Prom(cW)) + " / " + F0(Max(cW)) + " W" : T("potencia: ", "power: ") + (cpuDriver ? T("sin dato", "no data") : sinDriver))
+                    + (nMax.Count > 0 ? T("   ·   núcleo más cargado ", "   ·   busiest core ") + F0(Prom(nMax)) + " %" : ""));
             else L.Add(T("  CPU: sin datos de sensores.", "  CPU: no sensor data."));
             if (gT.Count + gU.Count + gF.Count + gW.Count > 0)
                 L.Add("  GPU" + (gpu != "" ? " (" + gpu + ")" : "") + ": " + F0(Prom(gT)) + " / " + F0(Max(gT)) + " °C   ·   " + T("uso ", "usage ") + F0(Prom(gU)) + " / " + F0(Max(gU)) + " %   ·   "
                     + F0(Prom(gF)) + " MHz   ·   " + F0(Prom(gW)) + " / " + F0(Max(gW)) + " W");
             else L.Add(T("  GPU: sin datos de sensores.", "  GPU: no sensor data."));
-            if (ram.Count > 0) L.Add("  RAM: " + F0(Prom(ram)) + " / " + F0(Max(ram)) + " %");
-            if (cT.Count == 0) info.Add(T("Sin temperatura del procesador: hace falta PawnIO (pestaña PC).", "No CPU temperature: PawnIO is needed (PC tab)."));
+            double ramTot = 0, ramGbMax = 0; foreach (Punto m in ms) { if (m.RamTotalGB > ramTot) ramTot = m.RamTotalGB; if (m.RamGB > ramGbMax) ramGbMax = m.RamGB; }
+            if (ram.Count > 0) L.Add("  RAM: " + F0(Prom(ram)) + " / " + F0(Max(ram)) + " %" + (ramTot > 0 ? T("   ·   máx. ", "   ·   max ") + F1(ramGbMax) + T(" GB de ", " GB of ") + F1(ramTot) + " GB" : ""));
+            List<float> vram = Col(ms, delegate (Punto m) { return m.VramMB; }), vramTot = Col(ms, delegate (Punto m) { return m.VramTotalMB; });
+            if (vram.Count > 0) L.Add("  VRAM: " + F1(Prom(vram) / 1024) + " / " + F1(Max(vram) / 1024) + " GB" + (vramTot.Count > 0 ? T(" de ", " of ") + F1(Max(vramTot) / 1024) + " GB" : ""));
+            List<float> pag = Col(ms, delegate (Punto m) { return m.Paginas; }), pagUso = Col(ms, delegate (Punto m) { return m.PagUso; });
+            if (pag.Count > 0) L.Add(T("  Paginación: ", "  Paging: ") + F0(Prom(pag)) + " / " + F0(Max(pag)) + T(" páginas/s leídas del disco", " pages/s read from disk") + (pagUso.Count > 0 ? T("   ·   archivo de paginación al ", "   ·   page file at ") + F0(Max(pagUso)) + " %" : ""));
+            else L.Add(T("  Paginación: sin datos (prendé la pestaña Memoria para medirla).", "  Paging: no data (turn on the Memory tab to measure it)."));
+            if (cT.Count == 0) info.Add(T("Sin temperatura del procesador: este equipo no la da sin drivers. Es opcional: en la pestaña CPU, \"Cómo instalar PawnIO\".", "No CPU temperature: this PC does not report it without drivers. It is optional: in the CPU tab, \"How to install PawnIO\"."));
 
             // ---- Problemas a partir de los sensores ----
             int cpuTerm = Frenadas(ms, delegate (Punto m) { return m.CpuMhz; }, delegate (Punto m) { return m.CpuU; }, delegate (Punto m) { return m.CpuT; }, limCpu, true);
@@ -247,20 +288,24 @@ namespace Xuca
             else if (Max(gT) >= TempPeligro)
                 problemas.Add(T("La placa de video llegó a " + F0(Max(gT)) + " °C (zona de peligro desde " + F0(TempPeligro) + " °C).",
                                 "The graphics card reached " + F0(Max(gT)) + " °C (danger zone from " + F0(TempPeligro) + " °C)."));
+            // Sin temperatura real del CPU: indicio de que se freno (lo que dice Windows; no es una temperatura). Suma al throttling.
+            int cpuIndicio = 0;
+            if (!cpuDriver)
+            {
+                float refMhz = 0;
+                foreach (Punto m in ms) if (m.CpuMhz.HasValue && m.CpuU.HasValue && m.CpuU.Value >= CargaAlta && (!m.CpuLim.HasValue || m.CpuLim.Value >= 100) && m.CpuMhz.Value > refMhz) refMhz = m.CpuMhz.Value;
+                foreach (Punto m in ms)
+                    if (m.CpuU.HasValue && m.CpuU.Value >= CargaAlta && ((m.CpuLim.HasValue && m.CpuLim.Value < 90) || (refMhz > 0 && m.CpuMhz.HasValue && m.CpuMhz.Value < refMhz * CaidaReloj))) cpuIndicio++;
+                if (cpuIndicio >= MinMuestrasThrottle && cpuTerm + cpuEnergia < MinMuestrasThrottle)
+                    problemas.Add(T("Indicio de que el procesador se frenó durante " + cpuIndicio + " s con carga alta (Windows informó un límite de rendimiento o la frecuencia cayó más de un 15 %). No es una temperatura: puede ser calor o un límite de energía; la temperatura del procesador " + sinDriver + ".",
+                                    "Hint that the CPU throttled for " + cpuIndicio + " s under high load (Windows reported a performance limit or the clock dropped by over 15 %). This is not a temperature: it may be heat or a power limit; the CPU temperature " + sinDriver + "."));
+                else cpuIndicio = 0;
+            }
             if (gpuPot >= MinMuestrasThrottle)
                 info.Add(T("La placa de video bajó su frecuencia durante " + gpuPot + " s estando fresca y al tope de uso: es su límite de potencia (normal en muchas placas).",
                            "The graphics card lowered its clock for " + gpuPot + " s while cool and fully loaded: that is its power limit (normal on many cards)."));
             double gProm = Prom(gU), nProm = Prom(nMax);
-            if (!double.IsNaN(gProm))
-            {
-                if (gProm >= GpuTope) info.Add(T("La placa de video fue el límite (" + F0(gProm) + " % de uso promedio): es lo normal en un juego exigente.", "The graphics card was the limit (" + F0(gProm) + " % average usage): normal in a demanding game."));
-                else if (gProm < GpuEsperando && !double.IsNaN(nProm) && nProm >= NucleoTope)
-                    problemas.Add(T("Cuello de botella del procesador: la placa de video estuvo al " + F0(gProm) + " % en promedio mientras el núcleo más cargado del procesador estaba al " + F0(nProm) + " %. El procesador no le da abasto.",
-                                    "CPU bottleneck: the graphics card averaged " + F0(gProm) + " % while the busiest CPU core was at " + F0(nProm) + " %. The CPU cannot keep up."));
-                else if (gProm < GpuEsperando)
-                    info.Add(T("La placa de video estuvo al " + F0(gProm) + " % en promedio sin que el procesador estuviera al tope: probablemente hay un límite de FPS (VSync o tope de FPS).",
-                               "The graphics card averaged " + F0(gProm) + " % without the CPU being maxed out: there is probably an FPS limit (VSync or an FPS cap)."));
-            }
+            // CPU contra GPU: lo dice "CUELLO DE BOTELLA" (Sesion.cs), con mas datos
             if (Max(ram) >= RamLlena)
                 problemas.Add(T("La RAM llegó al " + F0(Max(ram)) + " %: con la memoria casi llena Windows empieza a usar el disco, y eso da tirones.",
                                 "RAM reached " + F0(Max(ram)) + " %: with memory almost full, Windows starts using the drive, which causes stutter."));
@@ -275,6 +320,16 @@ namespace Xuca
             if (problemas.Count == 0) L.Add(T("  Ninguno con los datos que hay.", "  None with the available data."));
             foreach (string p in problemas) L.Add(p.StartsWith("    ") ? p : "  - " + p);
             if (info.Count > 0) { L.Add(""); L.Add(T("PARA TENER EN CUENTA:", "GOOD TO KNOW:")); foreach (string p in info) L.Add("  - " + p); }
+            {
+                Diagnostico.Datos d = new Diagnostico.Datos();
+                d.Fps = fpsProm; d.Low1 = low1; d.Tirones = tirones; d.Minutos = minutosJuego; d.Ruta = ruta;
+                d.CpuTMax = Max(cT); d.CpuUProm = Prom(cU); d.LimCpu = limCpu; d.GpuTMax = Max(gT); d.GpuUProm = gProm; d.NucleoProm = nProm;
+                d.ThrottleCpu = cpuTerm + cpuEnergia + cpuIndicio; d.ThrottleGpu = gpuTerm;
+                d.RamMax = Max(ram); d.RamTotalGB = ramTot; d.RamGbMax = ramGbMax;
+                d.VramMax = Max(vram); d.VramTotal = Max(vramTot); d.PagProm = Prom(pag); d.PagMax = Max(pag);
+                d.GpuNombre = gpu; d.Problemas = problemas.Count;
+                L.AddRange(Diagnostico.Armar(d));
+            }
 
             // ---- Guardar y comparar con la corrida anterior del mismo juego ----
             string dir = Path.Combine(carpeta, "benchmarks"), csv = Path.Combine(dir, "benchmarks.csv"), comp = null, txt = null;
@@ -297,7 +352,7 @@ namespace Xuca
             if (txt != null) { try { File.WriteAllText(txt, texto + "\r\n", Encoding.UTF8); } catch { } }
 
             string corto = jg + ": " + (double.IsNaN(fpsProm) ? T("sin FPS", "no FPS") : F0(fpsProm) + T(" FPS promedio, 1 % low ", " FPS average, 1% low ") + F0(low1))
-                + " · " + (problemas.Count == 0 ? T("sin problemas", "no problems") : problemas.Count + T(" problema(s): mirá Rendimiento", " problem(s): see Performance"));
+                + " · " + (problemas.Count == 0 ? T("sin problemas", "no problems") : problemas.Count + T(" problema(s): mirá Sesión", " problem(s): see Session"));
             return new string[] { texto, corto };
         }
 

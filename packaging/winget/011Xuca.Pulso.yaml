@@ -1,0 +1,9 @@
+# Manifiesto de winget (version). El workflow publicar.yml reemplaza __VERSION__ y __SHA256__ y deja los 4 archivos listos
+# como artefacto "winget-manifests". La primera vez se envian a mano: wingetcreate submit <carpeta>. Despues el workflow
+# manda cada version sola con wingetcreate update (hace falta el secreto WINGET_TOKEN).
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
+PackageIdentifier: 011Xuca.Pulso
+PackageVersion: __VERSION__
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

@@ -1,6 +1,6 @@
 // Lo UNICO de la app que usa LibreHardwareMonitorLib (sensores reales de CPU, GPU, RAM, placa madre y discos).
 // Esta separado a proposito: el resto del codigo solo ve las clases simples de Pc.cs (Lectura, Disco, Dato...),
-// asi si la libreria no se puede cargar, falla solo esto y la app sigue andando sin la pestaña PC.
+// asi si la libreria no se puede cargar, falla solo esto y la app sigue andando sin las pestañas de hardware.
 // Los nombres de los sensores son los de LibreHardwareMonitor 0.9.6 (revisados en su codigo fuente).
 using System;
 using System.Collections.Generic;
@@ -142,7 +142,11 @@ namespace Xuca
             }
             L.CpuLoad = V(Exacto(cpu, SensorType.Load, "CPU Total"));
             L.CpuPower = V(Exacto(cpu, SensorType.Power, "CPU Package", "Package"));
-            L.CpuVolt = V(Exacto(cpu, SensorType.Voltage, "CPU Core", "Core (SVI2 TFN)"));
+            if (L.CpuPower.HasValue && L.CpuPower.Value <= 0) L.CpuPower = null;   // sin PawnIO la libreria deja el sensor en 0 W
+            // Sin PawnIO (no puede leer MSR/SMN) la libreria igual crea los sensores, pero en 0 (temperatura, W, MHz) o fijos
+            // (VID 1.55 V en Ryzen): visto en esta PC sin acceso al driver. Solo el uso (de Windows) es real.
+            L.CpuBajoNivel = L.CpuTemp.HasValue || L.CpuPower.HasValue;
+            L.CpuVolt = L.CpuBajoNivel ? V(Exacto(cpu, SensorType.Voltage, "CPU Core", "Core (SVI2 TFN)")) : null;
 
             // Velocidad: promedio y maximo de los nucleos (sin "Bus Speed" ni los promedios que ya calcula la libreria)
             float suma = 0, max = 0; int n = 0;
@@ -168,6 +172,7 @@ namespace Xuca
                         L.CpuNucleos.Add(s.Value.Value);
 
             Todos(cpu, L.CpuDatos, false);
+            if (!L.CpuBajoNivel) { string uso = Grupo(SensorType.Load); L.CpuDatos.RemoveAll(delegate (Dato d) { return d.Grupo != uso; }); }
         }
 
         // La placa de video principal: la dedicada (NVIDIA, o la de mas memoria propia), no la integrada del procesador
@@ -277,6 +282,7 @@ namespace Xuca
                     if (s.SensorType != tipo || !s.Value.HasValue || s.Name == null) continue;
                     if (s.Name.IndexOf("Distance to TjMax", StringComparison.OrdinalIgnoreCase) >= 0) continue;
                     if (tipo == SensorType.Temperature && (s.Value.Value <= 0 || s.Value.Value > 150)) continue;
+                    if ((tipo == SensorType.Power || tipo == SensorType.Clock) && s.Value.Value <= 0) continue;   // 0 W / 0 MHz = no lo pudo leer
                     if (tipo == SensorType.Voltage && soloTempsYFans && s.Value.Value <= 0) continue;
                     Dato d = new Dato();
                     d.Grupo = Grupo(tipo);

@@ -28,6 +28,8 @@ namespace Xuca
         // Se llama al final de Iniciar: si se llego hasta aca, esta version arranco bien y la anterior ya no hace falta.
         void EmpezarBusquedaAct()
         {
+            // Instalada desde la Microsoft Store la actualiza la Store (la carpeta del paquete no se puede escribir)
+            if (Empaquetada) return;
             // Lo que dejo una actualizacion anterior (o una a medias)
             foreach (string resto in new string[] { ".viejo", ".nuevo", ".roto" }) { try { File.Delete(Exe + resto); } catch { } }
             timerAct = new System.Threading.Timer(delegate { Buscar(); }, null, 20000, Timeout.Infinite);

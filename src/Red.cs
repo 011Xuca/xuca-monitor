@@ -1,8 +1,9 @@
-// Monitor de red: avisa cuando se corta internet o sube el ping, y explica por que.
+// Monitor de red: latencia en vivo (ping, promedio, jitter, perdida), y avisa cuando se corta internet o sube el ping, y explica por que.
 // Todo corre en un hilo aparte con prioridad baja; la ventana solo existe mientras esta abierta.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.Diagnostics.Eventing.Reader;
 using System.Globalization;
 using System.Net.NetworkInformation;
@@ -272,6 +273,7 @@ namespace Xuca
                 if (hist.Count > 50) hist.RemoveRange(0, hist.Count - 50);
             }
 
+            Latencia(ok);
             if (!ok)
             {
                 fallos++;
@@ -334,6 +336,58 @@ namespace Xuca
             }
             pasos++;
             prev = ahora;
+        }
+
+        // ---------- Latencia en vivo (el panel de arriba de la pestaña) ----------
+        // Ping a internet (el mejor entre 1.1.1.1 y 8.8.8.8, cada 250 ms), su promedio y su variacion (jitter) de los ultimos
+        // 10 s, y el ultimo ping al router. -1 = sin respuesta.
+        volatile int pingAhora = -1, pingProm = -1, jitter = -1, perdidos;
+        readonly Queue<int> lat = new Queue<int>();
+
+        void Latencia(bool ok)
+        {
+            pingAhora = ok ? rtt : -1;
+            lat.Enqueue(ok ? rtt : -1);
+            while (lat.Count > 40) lat.Dequeue();
+            long s = 0; int n = 0, malos = 0, ant = -1; long dif = 0; int nd = 0;
+            foreach (int v in lat)
+            {
+                if (v < 0) { malos++; ant = -1; continue; }
+                s += v; n++;
+                if (ant >= 0) { dif += Math.Abs(v - ant); nd++; }
+                ant = v;
+            }
+            pingProm = n > 0 ? (int)(s / n) : -1;
+            jitter = nd > 0 ? (int)Math.Round((double)dif / nd) : -1;
+            perdidos = lat.Count > 0 ? malos * 100 / lat.Count : 0;
+        }
+
+        string TextoLatencia()
+        {
+            if (!Activo) return T(ApagadoEs, ApagadoEn);
+            if (pingProm < 0 && pingAhora < 0) return T("Midiendo la latencia...", "Measuring latency...");
+            string r = T("Ping a internet: ", "Ping to the internet: ") + (pingAhora >= 0 ? pingAhora + " ms" : T("sin respuesta", "no answer"))
+                + T("   ·   promedio (10 s): ", "   ·   average (10 s): ") + (pingProm >= 0 ? pingProm + " ms" : "—")
+                + T("   ·   variación (jitter): ", "   ·   jitter: ") + (jitter >= 0 ? jitter + " ms" : "—")
+                + (perdidos > 0 ? T("   ·   paquetes perdidos: ", "   ·   packet loss: ") + perdidos + " %" : "");
+            if (baseR >= 0) r += T("   ·   router: ", "   ·   router: ") + baseR + " ms";
+            if (baseP < 9999) r += T("   ·   lo normal en esta PC: ", "   ·   normal on this PC: ") + (int)baseP + " ms";
+            return r;
+        }
+
+        public override Control PanelExtra()
+        {
+            Label l = new Label();
+            float k = 1; try { k = l.DeviceDpi / 96f; } catch { }
+            l.Height = (int)(30 * k);
+            l.Padding = new Padding((int)(12 * k), (int)(6 * k), (int)(12 * k), 0);
+            l.Font = new Font("Segoe UI Semibold", 9.5f);
+            System.Windows.Forms.Timer t = new System.Windows.Forms.Timer(); t.Interval = 1000;
+            t.Tick += delegate { l.Text = TextoLatencia(); };
+            l.Text = TextoLatencia();
+            t.Start();
+            l.Disposed += delegate { t.Stop(); t.Dispose(); };
+            return l;
         }
 
         // ---------- Reportes ----------

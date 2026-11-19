@@ -3,10 +3,13 @@
 // procesador al limite y frenandose (throttling), placa de video caliente o con el hot spot muy por encima del nucleo,
 // ventiladores parados, conector 12VHPWR con un pin sobrecargado, VRAM o RAM llena (con que programas la llenan),
 // RAM sin XMP/EXPO o en single channel, discos calientes o gastados.
-// Adentro de la pestaña "PC" hay 5 categorias (General, CPU, GPU, RAM, Discos), cada una con su registro, su contador y
-// su propio "Guardar avisos". General guarda una copia de todo.
+// Se ve en 4 pestañas propias (CPU, GPU, Memoria, Discos: ver PcPestana), cada una con su registro, su contador y su
+// "Activado". Todas leen de este mismo monitor (un solo hilo y una sola conexion a los sensores), que anda mientras
+// haya al menos una prendida. registro_pc.txt guarda una copia de todo.
 // Los sensores salen de LibreHardwareMonitorLib (ver Sensores.cs). Para la temperatura del procesador hace falta el
-// driver PawnIO (firmado, gratis): si no esta, se ofrece instalarlo. La RAM y la BIOS salen de WMI y de la tabla SMBIOS.
+// driver PawnIO (firmado, gratis, opcional: lo instala el usuario, ver GuiaPawn); sin el se usa la zona termica de Windows si es creible.
+// Lo que Windows da sin drivers (frecuencia y limite del CPU, NVMe directo, bateria en W) esta en SinDriver.cs.
+// La RAM y la BIOS salen de WMI y de la tabla SMBIOS.
 // Ademas guarda una "foto" liviana cada 2 s: sirve para el grafico, los maximos, y para que las pestañas Errores y
 // Rendimiento digan como estaba la PC justo cuando paso algo (tambien lo ultimo antes de un apagon o pantallazo).
 using System;
@@ -15,10 +18,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Management;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -32,7 +33,14 @@ namespace Xuca
 
     public class Dato { public string Grupo, Nombre, Valor, Pico; }
     public class Ventilador { public string Nombre; public float Rpm, MaxRpm; }
-    public class Disco { public string Nombre; public float? Temp, TempMax, TempAviso, TempCritica, Vida, Lleno, EscritoGB, Horas, Actividad; }
+    public class Disco
+    {
+        public string Nombre; public float? Temp, TempMax, TempAviso, TempCritica, Vida, Lleno, EscritoGB, Horas, Actividad;
+        // Sin % de vida (HDD): estado calculado con atributos SMART reales (SmartAta) y su detalle
+        public string Estado = "", EstadoDetalle = ""; public Nivel NivelEstado = Nivel.Gris;
+    }
+    // Disco fisico segun Windows (sin drivers): tipo y bus (NVMe, SSD SATA, HDD, USB), salud SMART y velocidad en vivo
+    public class DiscoFisico { public int Numero; public string Nombre = "", Tipo = "", Salud = "", Letras = ""; public Nivel NivelSalud = Nivel.Gris; public bool Lento; public double LeeMBs = -1, EscribeMBs = -1; }
 
     public class Lectura
     {
@@ -41,6 +49,10 @@ namespace Xuca
         public string CpuNombre = "", CpuTempFuente = "";
         public float? CpuTemp, CpuTempMaxLib, CpuLoad, CpuPower, CpuClockProm, CpuClockMax, CpuVolt;
         public int CpuTjMax;
+        // Sin driver (Windows): % de rendimiento (frecuencia / base) y % de limite que impone el firmware (100 = sin limite)
+        public float? CpuPerfPct, CpuLimitePct;
+        // CpuBajoNivel: la libreria pudo leer temperatura o vatios reales (hay PawnIO). CpuClockWindows: los MHz son de Windows
+        public bool CpuBajoNivel, CpuClockWindows, CpuPowerWindows;
         public readonly List<float> CpuNucleos = new List<float>();
         public string GpuNombre = "", GpuPinNombre = "";
         public readonly List<string> GpuOtras = new List<string>();
@@ -54,6 +66,10 @@ namespace Xuca
         public readonly List<Dato> CpuDatos = new List<Dato>(), GpuDatos = new List<Dato>(), PlacaDatos = new List<Dato>();
         public string Juego = "";
         public int Bateria = -1; public bool Enchufada = true;
+        public float? BateriaW;   // + cargando, - descargando (notebooks; Windows)
+        // Paginacion (contadores de Windows): paginas leidas del disco por segundo (fallos de pagina duros) y % del archivo de paginacion en uso
+        public float? PaginasSeg, PaginacionUso;
+        public readonly List<DiscoFisico> Fisicos = new List<DiscoFisico>();
     }
 
     public class ModuloRam
@@ -81,6 +97,7 @@ namespace Xuca
         public string RamMezclaTexto = "";
         public int RamVelModulos;
         public volatile string Plan = "", PlanGuid = "";
+        public volatile List<DiscoFisico> Fisicos = new List<DiscoFisico>();   // se relee cada 2 min (la salud SMART puede cambiar)
     }
 
     // Una "foto" liviana cada 2 s (para el grafico, los maximos, y para contarle a Errores/Rendimiento como estaba la PC)
@@ -99,202 +116,42 @@ namespace Xuca
 
         public MonitorPC()
         {
-            Clave = "pc"; PestEs = "PC"; PestEn = "PC"; TipEs = "PC"; TipEn = "PC";
-            NombreEs = "Monitor de PC"; NombreEn = "PC Monitor";
+            // No es una pestaña: la app no lo muestra, solo lo usan las 4 pestañas de hardware (PcPestana)
+            Clave = "pc"; PestEs = PestEn = TipEs = TipEn = "PC";
+            NombreEs = "Monitor de hardware"; NombreEn = "Hardware monitor";
             RegistroArch = "registro_pc.txt"; HistArch = "historial_pc.txt";
             ContEs = "Avisos"; ContEn = "Alerts";
-            VacioEs = "Todo bien por ahora. Acá vas a ver cuándo el procesador, la placa de video, la RAM o un disco llegan al rojo, y por qué.";
-            VacioEn = "All good so far. You will see here when the CPU, graphics card, RAM or a drive hits red, and why.";
-            ApagadoEs = "El monitor de PC está apagado. Prendelo con la casilla \"Activado\" para ver temperaturas, uso y más en vivo.";
-            ApagadoEn = "The PC monitor is off. Turn it on with the \"Enabled\" box to see live temperatures, usage and more.";
+            VacioEs = VacioEn = ApagadoEs = ApagadoEn = "";
             Instancia = this;
+            Pestanas = new PcPestana[] {
+                new PcPestana(this, CAT_CPU, "cpu", "CPU", "CPU", "Procesador y placa madre", "CPU and motherboard",
+                    "Sin avisos del procesador. Acá aparecen el límite de temperatura, el throttling por calor o energía, el ventilador parado, la BIOS que necesita actualizarse y el plan de energía o la batería que frenan al jugar.",
+                    "No CPU alerts. This is where temperature limit, heat or power throttling, a stopped fan, a BIOS that needs updating and a power plan or battery holding back games show up."),
+                new PcPestana(this, CAT_GPU, "gpu", "GPU", "GPU", "Placa de video", "Graphics card",
+                    "Sin avisos de la placa de video. Acá aparecen la temperatura del núcleo, hot spot y memoria fuera de rango, ventiladores parados, VRAM llena y el conector 12VHPWR sobrecargado.",
+                    "No graphics card alerts. This is where core, hot spot and memory temperatures out of range, stopped fans, full VRAM and an overloaded 12VHPWR connector show up."),
+                new PcPestana(this, CAT_RAM, "memoria", "Memoria", "Memory", "Memoria RAM", "Memory",
+                    "Sin avisos de la memoria. Acá aparecen la RAM llena (con qué programas la llenan), los módulos calientes, el XMP/EXPO apagado y el single channel.",
+                    "No memory alerts. This is where full RAM (and which programs fill it), hot modules, XMP/EXPO turned off and single channel show up."),
+                new PcPestana(this, CAT_DISCOS, "discos", "Discos", "Drives", "Discos", "Drives",
+                    "Sin avisos de los discos. Acá aparecen el disco que se frena por temperatura, el que tiene poca vida útil y el que Windows marca con fallas (SMART).",
+                    "No drive alerts. This is where a drive throttling from heat, one with little life left and one Windows flags as failing (SMART) show up."),
+            };
         }
 
-        // =====================================================================================================
-        // Categorias: General / CPU / GPU / RAM / Discos
-        // =====================================================================================================
-        public class Categoria
-        {
-            public string Clave, NombreEs, NombreEn, VacioEs, VacioEn;
-            public bool Activo = true;
-            public string LogF, HistF;
-            readonly object cerrojo = new object();
-            readonly List<KeyValuePair<int, string>> bloques = new List<KeyValuePair<int, string>>();
-            int cuenta;
-
-            public string Nombre { get { return Modulo.T(NombreEs, NombreEn); } }
-            public int Cuenta { get { lock (cerrojo) return cuenta; } }
-
-            public void Cargar()
-            {
-                try
-                {
-                    if (!File.Exists(HistF)) return;
-                    string[] partes = Regex.Split(File.ReadAllText(HistF, Encoding.UTF8), "(?m)^@@(\\d+)\\r?\\n");
-                    lock (cerrojo)
-                    {
-                        for (int i = 1; i + 1 < partes.Length; i += 2)
-                        {
-                            string t = partes[i + 1].TrimEnd();
-                            int n; int.TryParse(partes[i], out n);
-                            if (t.Length > 0) { bloques.Add(new KeyValuePair<int, string>(n, t)); cuenta += n; }
-                        }
-                        if (bloques.Count > 300)
-                        {
-                            bloques.RemoveRange(0, bloques.Count - 300);
-                            StringBuilder sb = new StringBuilder();
-                            foreach (KeyValuePair<int, string> b in bloques) sb.Append("@@" + b.Key + "\r\n" + b.Value + "\r\n");
-                            File.WriteAllText(HistF, sb.ToString(), Encoding.UTF8);
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            public void Log(string t)
-            {
-                lock (cerrojo) { try { File.AppendAllText(LogF, Modulo.Fecha(DateTime.Now) + "  " + t + "\r\n", Encoding.UTF8); } catch { } }
-            }
-
-            public void Agregar(string texto, int suma)
-            {
-                lock (cerrojo)
-                {
-                    bloques.Add(new KeyValuePair<int, string>(suma, texto));
-                    if (bloques.Count > 300) bloques.RemoveAt(0);
-                    cuenta += suma;
-                    try { File.AppendAllText(HistF, "@@" + suma + "\r\n" + texto + "\r\n", Encoding.UTF8); } catch { }
-                }
-            }
-
-            public void Limpiar()
-            {
-                lock (cerrojo) { bloques.Clear(); cuenta = 0; try { File.Delete(HistF); } catch { } }
-            }
-
-            public string Texto()
-            {
-                StringBuilder sb = new StringBuilder();
-                lock (cerrojo)
-                {
-                    string sep = "\r\n\r\n" + new string('-', 70) + "\r\n\r\n";
-                    for (int i = bloques.Count - 1; i >= 0; i--)
-                    {
-                        if (sb.Length > 0) sb.Append(sep);
-                        sb.Append(bloques[i].Value);
-                    }
-                }
-                if (sb.Length > 0) return sb.ToString();
-                return Activo ? Modulo.T(VacioEs, VacioEn)
-                    : Modulo.T("Esta categoría no guarda avisos (está apagada). Prendela con \"Guardar avisos\" en la fila de arriba.",
-                        "This category does not save alerts (it is off). Turn it on with \"Save alerts\" in the row above.");
-            }
-        }
-
-        public const int CAT_GENERAL = 0, CAT_CPU = 1, CAT_GPU = 2, CAT_RAM = 3, CAT_DISCOS = 4, CATS = 5;
-        Categoria[] cats;
-        int catActual;
-        readonly object cerrojoCats = new object();
+        public const int CAT_CPU = 0, CAT_GPU = 1, CAT_RAM = 2, CAT_DISCOS = 3, CATS = 4;
+        public readonly PcPestana[] Pestanas;
         string carpeta;
 
-        public int CatActual { get { return catActual; } }
-        public Categoria Cat(int i) { Asegurar(); return cats == null ? null : cats[i]; }
-
-        // Arma las categorias la primera vez (hace falta saber donde van los archivos, eso lo pone la app al arrancar)
-        void Asegurar()
+        // Prende el monitor si hay alguna pestaña de hardware prendida, y lo apaga si no queda ninguna
+        internal void Recalcular()
         {
-            if (cats != null || LogF == null) return;
-            lock (cerrojoCats)
-            {
-                if (cats != null) return;
-                carpeta = Path.GetDirectoryName(LogF);
-                Categoria[] c = new Categoria[CATS];
-                c[CAT_GENERAL] = Nueva("general", "General", "General", LogF, HistF,
-                    VacioEs, VacioEn);
-                c[CAT_CPU] = Nueva("cpu", "CPU", "CPU", "registro_pc_cpu.txt", "historial_pc_cpu.txt",
-                    "Todo bien con el procesador por ahora. Acá vas a ver si llega a su límite de temperatura, si se frena por calor, si está muy caliente mucho rato o si su ventilador se para.",
-                    "All good with the CPU so far. You will see here if it hits its temperature limit, throttles from heat, stays very hot for a long time or if its fan stops.");
-                c[CAT_GPU] = Nueva("gpu", "GPU", "GPU", "registro_pc_gpu.txt", "historial_pc_gpu.txt",
-                    "Todo bien con la placa de video por ahora. Acá vas a ver si se calienta de más, si el hot spot o la memoria se pasan, si sus ventiladores se paran, si la VRAM se llena o si el conector 12VHPWR se sobrecarga.",
-                    "All good with the graphics card so far. You will see here if it overheats, if the hot spot or memory go too high, if its fans stop, if VRAM fills up or if the 12VHPWR connector is overloaded.");
-                c[CAT_RAM] = Nueva("ram", "RAM", "RAM", "registro_pc_ram.txt", "historial_pc_ram.txt",
-                    "Todo bien con la RAM por ahora. Acá vas a ver si se llena (y qué la llena), si el XMP/EXPO está apagado o si trabaja en single channel.",
-                    "All good with RAM so far. You will see here if it fills up (and what fills it), if XMP/EXPO is off or if it runs in single channel.");
-                c[CAT_DISCOS] = Nueva("discos", "Discos", "Drives", "registro_pc_discos.txt", "historial_pc_discos.txt",
-                    "Todo bien con los discos por ahora. Acá vas a ver si un disco se calienta tanto que se frena o si le queda poca vida.",
-                    "All good with the drives so far. You will see here if a drive gets so hot it slows down or if it has little life left.");
-                foreach (Categoria x in c)
-                {
-                    x.Cargar();
-                    x.Activo = App.Ajuste("pc_" + x.Clave) != "0";
-                }
-                int.TryParse(App.Ajuste("pc_cat") ?? "0", out catActual);
-                if (catActual < 0 || catActual >= CATS) catActual = 0;
-                // El historial general ya lo habia cargado la clase base en su propia lista: ya no hace falta
-                lock (Cerrojo) { Bloques.Clear(); Cuenta = 0; }
-                cats = c;
-                LogF = c[catActual].LogF; HistF = c[catActual].HistF;
-            }
+            bool alguna = false;
+            foreach (PcPestana p in Pestanas) if (p.Activo) alguna = true;
+            Prender(alguna);
         }
 
-        Categoria Nueva(string clave, string es, string en, string log, string hist, string vacioEs, string vacioEn)
-        {
-            Categoria c = new Categoria();
-            c.Clave = clave; c.NombreEs = es; c.NombreEn = en; c.VacioEs = vacioEs; c.VacioEn = vacioEn;
-            c.LogF = Path.IsPathRooted(log) ? log : Path.Combine(carpeta, log);
-            c.HistF = Path.IsPathRooted(hist) ? hist : Path.Combine(carpeta, hist);
-            return c;
-        }
-
-        // Cambia que categoria se ve abajo (y que registro abre "Abrir registro")
-        public void Seleccionar(int i)
-        {
-            Asegurar();
-            if (cats == null || i < 0 || i >= CATS) return;
-            catActual = i;
-            LogF = cats[i].LogF; HistF = cats[i].HistF;
-            App.GuardarAjuste("pc_cat", i.ToString());
-        }
-
-        public void ActivarCat(int i, bool si)
-        {
-            Asegurar();
-            if (cats == null) return;
-            cats[i].Activo = si;
-            App.GuardarAjuste("pc_" + cats[i].Clave, si ? "1" : "0");
-        }
-
-        internal override string Texto()
-        {
-            Asegurar();
-            if (cats == null) return base.Texto();
-            if (!Activo) return T(ApagadoEs, ApagadoEn);
-            return cats[catActual].Texto();
-        }
-
-        internal override void Limpiar()
-        {
-            Asegurar();
-            if (cats == null) { base.Limpiar(); return; }
-            cats[catActual].Limpiar();
-        }
-
-        // El numero de la pestaña: General ya tiene una copia de todo; si General no guarda, se suman las demas
-        internal override int Contador()
-        {
-            Asegurar();
-            if (cats == null) return base.Contador();
-            if (cats[CAT_GENERAL].Activo) return cats[CAT_GENERAL].Cuenta;
-            int s = 0;
-            for (int i = 1; i < CATS; i++) s += cats[i].Cuenta;
-            return s;
-        }
-
-        void LogGeneral(string t)
-        {
-            Asegurar();
-            if (cats != null) cats[CAT_GENERAL].Log(t); else Log(t);
-        }
+        void LogGeneral(string t) { Log(t); }
 
         // Los errores tecnicos (de lectura de sensores) se anotan como mucho una vez cada 30 min, asi no llenan el registro
         readonly Dictionary<string, DateTime> errAnotado = new Dictionary<string, DateTime>();
@@ -320,13 +177,12 @@ namespace Xuca
         public volatile Lectura Ultima;
         public volatile InfoFija Fija;
         public volatile string ErrorSensores;
-        public volatile string EstadoPawn = "";
 
         protected override void Empezar()
         {
-            Asegurar();
+            carpeta = Path.GetDirectoryName(LogF);
             // Antes de escribir el archivo de los ultimos minutos, se guarda en memoria lo que dejo la sesion anterior
-            if (carpeta != null) SesionAnterior(carpeta);
+            SesionAnterior(carpeta);
             LeerPawn();
             parar = false;
             hilo = new Thread(Vuelta);
@@ -385,7 +241,13 @@ namespace Xuca
                             proximoIntento = DateTime.Now.AddMinutes(1);
                         }
                     }
-                    if (DateTime.Now >= proximoPlan) { LeerPlan(f); proximoPlan = DateTime.Now.AddMinutes(2); }
+                    if (DateTime.Now >= proximoPlan)
+                    {
+                        LeerPlan(f); LeerFisicos(f); smart = SmartAta.Leer(f.Fisicos); proximoPlan = DateTime.Now.AddMinutes(2);
+                        // El usuario instalo (o actualizo) PawnIO por su cuenta: se reabren los sensores para que la libreria lo use
+                        Version antes = PawnVersion; LeerPawn();
+                        if (PawnOk && PawnVersion != antes) { reabrir = true; LogGeneral(T("PawnIO detectado (v", "PawnIO detected (v") + PawnVersion + ")"); }
+                    }
 
                     Lectura L = new Lectura();
                     if (sens != null)
@@ -416,33 +278,76 @@ namespace Xuca
         [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
 
         [StructLayout(LayoutKind.Explicit)] struct PDH_VAL { [FieldOffset(0)] public int CStatus; [FieldOffset(8)] public double Valor; }
-        [DllImport("pdh.dll", CharSet = CharSet.Unicode)] static extern int PdhOpenQuery(string src, IntPtr user, out IntPtr q);
-        [DllImport("pdh.dll", CharSet = CharSet.Unicode)] static extern int PdhAddEnglishCounter(IntPtr q, string path, IntPtr user, out IntPtr c);
-        [DllImport("pdh.dll")] static extern int PdhCollectQueryData(IntPtr q);
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)] internal static extern int PdhOpenQuery(string src, IntPtr user, out IntPtr q);
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)] internal static extern int PdhAddEnglishCounter(IntPtr q, string path, IntPtr user, out IntPtr c);
+        [DllImport("pdh.dll")] internal static extern int PdhCollectQueryData(IntPtr q);
         [DllImport("pdh.dll")] static extern int PdhGetFormattedCounterValue(IntPtr c, int fmt, IntPtr tipo, out PDH_VAL v);
-        [DllImport("pdh.dll")] static extern int PdhCloseQuery(IntPtr q);
+        [DllImport("pdh.dll")] internal static extern int PdhCloseQuery(IntPtr q);
+        [DllImport("pdh.dll", CharSet = CharSet.Unicode)] static extern int PdhGetFormattedCounterArrayW(IntPtr c, int fmt, ref int bytes, out int n, IntPtr buf);
         const int PDH_DOUBLE = 0x200 | 0x8000;
-        IntPtr pdhQ, pdhPerf, pdhUso;
+        IntPtr pdhQ, pdhPag, pdhPagUso, pdhLee, pdhEsc;
+        // Procesador sin driver (frecuencia, % de rendimiento y de limite, zona termica ACPI): ver SinDriver.cs
+        readonly CpuWindows cpuWin = new CpuWindows();
+        // Temperatura y SMART de los NVMe pedidos directo al disco (sin driver ni admin), cuando la libreria no los da
+        List<Disco> directos = new List<Disco>();
+        DateTime proximoDirecto = DateTime.MinValue;
+        // SMART de los SATA por WMI (se relee cada 2 min, con la lista de discos)
+        List<SmartAta> smart = new List<SmartAta>();
 
         void AbrirPdh()
         {
+            cpuWin.Abrir();
             try
             {
                 if (PdhOpenQuery(null, IntPtr.Zero, out pdhQ) != 0) { pdhQ = IntPtr.Zero; return; }
-                if (PdhAddEnglishCounter(pdhQ, "\\Processor Information(_Total)\\% Processor Performance", IntPtr.Zero, out pdhPerf) != 0) pdhPerf = IntPtr.Zero;
-                if (PdhAddEnglishCounter(pdhQ, "\\Processor Information(_Total)\\% Processor Utility", IntPtr.Zero, out pdhUso) != 0) pdhUso = IntPtr.Zero;
+                pdhPag = Contador("\\Memory\\Pages Input/sec");
+                pdhPagUso = Contador("\\Paging File(_Total)\\% Usage");
+                pdhLee = Contador("\\PhysicalDisk(*)\\Disk Read Bytes/sec");
+                pdhEsc = Contador("\\PhysicalDisk(*)\\Disk Write Bytes/sec");
                 PdhCollectQueryData(pdhQ);
             }
             catch { pdhQ = IntPtr.Zero; }
+        }
+
+        IntPtr Contador(string ruta)
+        {
+            IntPtr c;
+            return PdhAddEnglishCounter(pdhQ, ruta, IntPtr.Zero, out c) == 0 ? c : IntPtr.Zero;
+        }
+
+        // Un contador con comodin (*): nombre de instancia -> valor. PDH_FMT_COUNTERVALUE_ITEM mide 24 bytes en 32 y 64 bits
+        // (puntero al nombre, y el valor alineado a 8: estado en +8, double en +16).
+        internal static Dictionary<string, double> PdhVarios(IntPtr c)
+        {
+            Dictionary<string, double> r = new Dictionary<string, double>();
+            if (c == IntPtr.Zero) return r;
+            int bytes = 0, n;
+            PdhGetFormattedCounterArrayW(c, PDH_DOUBLE, ref bytes, out n, IntPtr.Zero);
+            if (bytes <= 0) return r;
+            IntPtr buf = Marshal.AllocHGlobal(bytes);
+            try
+            {
+                if (PdhGetFormattedCounterArrayW(c, PDH_DOUBLE, ref bytes, out n, buf) != 0) return r;
+                for (int i = 0; i < n; i++)
+                {
+                    IntPtr it = new IntPtr(buf.ToInt64() + i * 24);
+                    if (Marshal.ReadInt32(it, 8) != 0) continue;
+                    string nom = Marshal.PtrToStringUni(Marshal.ReadIntPtr(it));
+                    if (nom != null) r[nom] = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(it, 16));
+                }
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+            return r;
         }
 
         void CerrarPdh()
         {
             try { if (pdhQ != IntPtr.Zero) PdhCloseQuery(pdhQ); } catch { }
             pdhQ = IntPtr.Zero;
+            cpuWin.Cerrar();
         }
 
-        static float? Pdh(IntPtr c)
+        internal static float? Pdh(IntPtr c)
         {
             if (c == IntPtr.Zero) return null;
             PDH_VAL v;
@@ -464,16 +369,65 @@ namespace Xuca
         void Propias(Lectura L, InfoFija f)
         {
             LeerRam(L);
-            // Sin PawnIO la libreria no puede medir los MHz de los nucleos: se usa lo que calcula Windows
-            // (lo mismo que muestra el Administrador de tareas: velocidad base x % de rendimiento)
+            // Sin PawnIO la libreria no puede medir los MHz de los nucleos ni la temperatura: se usa lo que da Windows
+            cpuWin.Leer(L, f.CpuBaseMHz);
+            // NVMe que la libreria no leyo (sin admin, o si no cargo): se le pide directo al disco cada 10 s
+            if (DateTime.Now >= proximoDirecto)
+            {
+                List<Disco> nuevos = new List<Disco>();
+                foreach (DiscoFisico fijo in f.Fisicos)
+                {
+                    if (TempDeLib(L, fijo.Nombre)) continue;
+                    Disco d = DiscoDirecto.Leer(fijo.Numero, fijo.Nombre, fijo.Tipo == "NVMe");
+                    if (d != null) nuevos.Add(d);
+                }
+                directos = nuevos; proximoDirecto = DateTime.Now.AddSeconds(10);
+            }
+            foreach (Disco d in directos)
+            {
+                if (TempDeLib(L, d.Nombre)) continue;
+                Disco lib = L.Discos.Find(delegate (Disco x) { return MismoDisco(x.Nombre, d.Nombre); });
+                if (lib == null) { L.Discos.Add(d); continue; }
+                // La libreria lo vio pero sin temperatura: se completa (el espacio usado sigue saliendo de ella)
+                lib.Temp = d.Temp; lib.TempAviso = d.TempAviso; lib.TempCritica = d.TempCritica;
+                if (!lib.Vida.HasValue) lib.Vida = d.Vida;
+                if (!lib.EscritoGB.HasValue) lib.EscritoGB = d.EscritoGB;
+                if (!lib.Horas.HasValue) lib.Horas = d.Horas;
+            }
+            // Discos sin % de vida (HDD): estado SMART real; y respaldo de temperatura (194/190) y escrito (241) si faltan
+            foreach (SmartAta s in smart)
+            {
+                Disco d = L.Discos.Find(delegate (Disco x) { return MismoDisco(x.Nombre, s.Nombre); });
+                if (d == null) { d = new Disco(); d.Nombre = s.Nombre; L.Discos.Add(d); }
+                if (d.Vida.HasValue) continue;   // SSD con su propio % de vida: alcanza con eso
+                d.Estado = s.Estado; d.NivelEstado = s.Nivel; d.EstadoDetalle = s.Detalle;
+                if (!d.Temp.HasValue) d.Temp = s.Temp;
+                if (!d.EscritoGB.HasValue) d.EscritoGB = s.EscritoGB;
+            }
+            L.BateriaW = BateriaWindows.Vatios();
             if (pdhQ != IntPtr.Zero)
             {
                 try
                 {
                     PdhCollectQueryData(pdhQ);
-                    float? perf = Pdh(pdhPerf);
-                    if (!L.CpuClockProm.HasValue && perf.HasValue && f.CpuBaseMHz > 0) L.CpuClockProm = f.CpuBaseMHz * perf.Value / 100f;
-                    if (!L.CpuLoad.HasValue) { float? u = Pdh(pdhUso); if (u.HasValue) L.CpuLoad = Math.Min(100f, u.Value); }
+                    L.PaginasSeg = Pdh(pdhPag);
+                    L.PaginacionUso = Pdh(pdhPagUso);
+                    // Velocidad de cada disco fisico: las instancias son "0 C:", "1 D: E:"... (el numero es el del disco)
+                    Dictionary<string, double> lee = PdhVarios(pdhLee), esc = PdhVarios(pdhEsc);
+                    foreach (DiscoFisico fijo in f.Fisicos)
+                    {
+                        DiscoFisico d = new DiscoFisico();
+                        d.Numero = fijo.Numero; d.Nombre = fijo.Nombre; d.Tipo = fijo.Tipo; d.Salud = fijo.Salud; d.NivelSalud = fijo.NivelSalud; d.Lento = fijo.Lento;
+                        foreach (KeyValuePair<string, double> kv in lee)
+                        {
+                            int sp = kv.Key.IndexOf(' '); int num;
+                            if (sp <= 0 || !int.TryParse(kv.Key.Substring(0, sp), out num) || num != d.Numero) continue;
+                            d.Letras = kv.Key.Substring(sp + 1).Trim();
+                            d.LeeMBs = kv.Value / 1048576.0;
+                            double e; if (esc.TryGetValue(kv.Key, out e)) d.EscribeMBs = e / 1048576.0;
+                        }
+                        L.Fisicos.Add(d);
+                    }
                 }
                 catch { }
             }
@@ -491,6 +445,18 @@ namespace Xuca
                 }
             }
             catch { }
+        }
+
+        // La libreria ya da la temperatura de ese disco (mismo modelo segun Windows)
+        static bool TempDeLib(Lectura L, string nombre)
+        {
+            foreach (Disco x in L.Discos) if (x.Temp.HasValue && MismoDisco(x.Nombre, nombre)) return true;
+            return false;
+        }
+        static bool MismoDisco(string a, string b)
+        {
+            a = (a ?? "").Trim(); b = (b ?? "").Trim();
+            return a != "" && b != "" && (a.IndexOf(b, StringComparison.OrdinalIgnoreCase) >= 0 || b.IndexOf(a, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         // Temperatura a la que el procesador se frena solo. Intel la informa (sale del sensor); AMD no, se usa la de fabrica.
@@ -599,6 +565,41 @@ namespace Xuca
         static string TipoRam(int c)
         {
             switch (c) { case 20: return "DDR"; case 21: return "DDR2"; case 24: return "DDR3"; case 26: return "DDR4"; case 34: return "DDR5"; case 35: return "LPDDR5"; case 30: return "LPDDR4"; default: return ""; }
+        }
+
+        // Discos fisicos segun el administrador de almacenamiento de Windows (sin drivers): tipo, bus y salud SMART
+        static void LeerFisicos(InfoFija f)
+        {
+            List<DiscoFisico> l = new List<DiscoFisico>();
+            try
+            {
+                using (ManagementObjectSearcher s = new ManagementObjectSearcher(@"root\Microsoft\Windows\Storage", "SELECT DeviceId, FriendlyName, MediaType, BusType, HealthStatus FROM MSFT_PhysicalDisk"))
+                    foreach (ManagementObject o in s.Get())
+                    {
+                        DiscoFisico d = new DiscoFisico();
+                        if (!int.TryParse(W(o, "DeviceId"), out d.Numero)) continue;
+                        d.Nombre = W(o, "FriendlyName");
+                        int media = WI(o, "MediaType"), bus = WI(o, "BusType"), salud = W(o, "HealthStatus") == "" ? -1 : WI(o, "HealthStatus");
+                        d.Tipo = TipoDisco(media, bus);
+                        d.Lento = media == 3 || bus == 7;   // HDD o por USB: paginar ahi da tirones
+                        d.NivelSalud = salud == 0 ? Nivel.Verde : salud == 1 ? Nivel.Amarillo : salud == 2 ? Nivel.Rojo : Nivel.Gris;
+                        d.Salud = salud == 0 ? T("Sana", "Healthy") : salud == 1 ? T("Con advertencias", "Warning") : salud == 2 ? T("Con fallas", "Failing") : T("Sin dato", "Unknown");
+                        l.Add(d);
+                        o.Dispose();
+                    }
+            }
+            catch { }
+            l.Sort(delegate (DiscoFisico a, DiscoFisico b) { return a.Numero.CompareTo(b.Numero); });
+            f.Fisicos = l;
+        }
+
+        // MediaType 3 = HDD, 4 = SSD, 5 = SCM; BusType 17 = NVMe, 11 = SATA, 7 = USB, 8 = RAID, 10 = SAS, 3 = ATA
+        public static string TipoDisco(int media, int bus)
+        {
+            if (bus == 17) return "NVMe";
+            string m = media == 3 ? "HDD" : media == 4 ? "SSD" : media == 5 ? "SCM" : "";
+            string b = bus == 11 ? "SATA" : bus == 7 ? "USB" : bus == 8 ? "RAID" : bus == 10 ? "SAS" : bus == 3 ? "ATA" : "";
+            return (m + " " + b).Trim();
         }
 
         // Plan de energia activo (en "Ahorro de energia" el procesador va mas lento)
@@ -843,7 +844,7 @@ namespace Xuca
             return string.Join("   |   ", p.ToArray());
         }
 
-        // Lo de los ultimos 10 s (vacio si la pestaña PC esta apagada)
+        // Lo de los ultimos 10 s (vacio si las pestañas de hardware estan apagadas)
         public static string ResumenAhora()
         {
             return Resumen(PicoEntre(DateTime.Now.AddSeconds(-10), DateTime.Now.AddSeconds(1)));
@@ -957,6 +958,7 @@ namespace Xuca
         Regla R(string k) { Regla r; if (!reglas.TryGetValue(k, out r)) { r = new Regla(); reglas[k] = r; } return r; }
 
         float cpuRefMhz;            // la velocidad que alcanza el procesador cargado y frio (para saber si se esta frenando)
+        float cpuRefSinTemp;        // lo mismo sin temperatura: la que logra cargado y sin limite del firmware
         float fanCpuMax;
         bool ramConfigAvisada, planAvisado, bateriaAvisada;
         string juegoAnterior = "";
@@ -1069,6 +1071,36 @@ namespace Xuca
                         rf.UltimoAviso = DateTime.Now;
                     }
                     break;
+                }
+            }
+
+            // Sin temperatura real (sin PawnIO): INDICIO de que se frena, con lo que dice Windows. No es una temperatura:
+            // el firmware le recorta el rendimiento (% Performance Limit) o los MHz caen con carga alta. Puede ser calor o energia.
+            if (!L.CpuBajoNivel)
+            {
+                bool cargado = L.CpuLoad.HasValue && L.CpuLoad.Value >= 50;
+                bool sinLimite = !L.CpuLimitePct.HasValue || L.CpuLimitePct.Value >= 100;
+                if (L.CpuClockProm.HasValue && L.CpuLoad.HasValue && L.CpuLoad.Value >= 40 && sinLimite && L.CpuClockProm.Value > cpuRefSinTemp) cpuRefSinTemp = L.CpuClockProm.Value;
+                bool limitado = L.CpuLimitePct.HasValue && L.CpuLimitePct.Value < 90;
+                bool cae = cpuRefSinTemp > 0 && L.CpuClockProm.HasValue && L.CpuClockProm.Value < cpuRefSinTemp * 0.85f;
+                Regla ri = R("cpu_indicio");
+                int ci = ri.Paso(cargado && (limitado || cae), 8, 5);
+                if (ci == 1 && ri.PuedeAvisar(30))
+                {
+                    List<string> que = new List<string>();
+                    if (limitado)
+                        que.Add(T("Windows informa que el procesador está limitado al " + (int)L.CpuLimitePct.Value + " % de su rendimiento máximo (lo recorta el propio procesador o la BIOS) con un uso del " + (int)L.CpuLoad.Value + " %.",
+                                  "Windows reports the CPU is limited to " + (int)L.CpuLimitePct.Value + " % of its maximum performance (cut by the CPU itself or the BIOS) at " + (int)L.CpuLoad.Value + " % usage."));
+                    if (cae)
+                        que.Add(T("Con carga alta bajó de " + Ghz(cpuRefSinTemp) + " a " + Ghz(L.CpuClockProm) + " (frecuencia según Windows).",
+                                  "Under high load it dropped from " + Ghz(cpuRefSinTemp) + " to " + Ghz(L.CpuClockProm) + " (clock according to Windows)."));
+                    que.Add(T("Es un indicio, no una temperatura: puede ser calor o un límite de energía (plan de energía, BIOS, notebook a batería). La temperatura del procesador requiere driver (PawnIO, opcional).",
+                              "This is a hint, not a temperature: it may be heat or a power limit (power plan, BIOS, laptop on battery). The CPU temperature requires a driver (PawnIO, optional)."));
+                    List<string> probar = new List<string>();
+                    probar.Add(T("Revisá el plan de energía (abajo) y que la notebook esté enchufada.", "Check the power plan (below) and that the laptop is plugged in."));
+                    probar.Add(T("Limpiá el polvo del cooler y fijate que el ventilador del procesador gire.", "Clean the dust from the cooler and check that the CPU fan spins."));
+                    Aviso(CAT_CPU, T("CPU: INDICIO DE QUE SE ESTÁ FRENANDO", "CPU: HINT THAT IT IS THROTTLING"), que, probar, ctx, 1);
+                    ri.UltimoAviso = DateTime.Now;
                 }
             }
 
@@ -1289,6 +1321,23 @@ namespace Xuca
                     else if (nv == Nivel.Verde && antes != null && antes != "Verde") App.GuardarAjuste(k, "Verde");
                 }
             }
+            // Salud que informa Windows (SMART): se avisa una vez por cada cambio, igual que la vida util
+            foreach (DiscoFisico d in f.Fisicos)
+            {
+                if (d.NivelSalud == Nivel.Gris) continue;
+                string k = "pc_salud_" + Regex.Replace(d.Nombre, "[^A-Za-z0-9]", "");
+                string antes = App.Ajuste(k);
+                if (d.NivelSalud == Nivel.Verde) { if (antes != null && antes != "Verde") App.GuardarAjuste(k, "Verde"); continue; }
+                if (antes == d.NivelSalud.ToString()) continue;
+                App.GuardarAjuste(k, d.NivelSalud.ToString());
+                List<string> que = new List<string>();
+                que.Add(T("Windows marca a " + d.Nombre + " (" + d.Tipo + ") como \"" + d.Salud + "\": el propio disco (SMART) informa errores o desgaste que anticipan una falla.",
+                          "Windows flags " + d.Nombre + " (" + d.Tipo + ") as \"" + d.Salud + "\": the drive itself (SMART) reports errors or wear that anticipate a failure."));
+                List<string> probar = new List<string>();
+                probar.Add(T("Hacé una copia de tus archivos importantes ya.", "Back up your important files now."));
+                probar.Add(T("Configuración > Sistema > Almacenamiento > Discos y volúmenes > Propiedades muestra el detalle.", "Settings > System > Storage > Disks & volumes > Properties shows the details."));
+                Aviso(CAT_DISCOS, T("DISCO: WINDOWS DETECTA FALLAS (SMART)", "DRIVE: WINDOWS DETECTS FAILURES (SMART)"), que, probar, "", 1);
+            }
 
             // ---------------- General: plan de ahorro de energia o notebook a bateria mientras jugas ----------------
             if (L.Juego != "" && L.Juego != juegoAnterior)
@@ -1300,7 +1349,7 @@ namespace Xuca
                     que.Add(T("Estás jugando con el plan de energía \"" + f.Plan + "\" (ahorro): el procesador no llega a su velocidad máxima y perdés FPS.", "You are gaming with the \"" + f.Plan + "\" (power saver) power plan: the CPU does not reach its full speed and you lose FPS."));
                     List<string> probar = new List<string>();
                     probar.Add(T("Panel de control > Opciones de energía > Equilibrado o Alto rendimiento.", "Control Panel > Power Options > Balanced or High performance."));
-                    Aviso(CAT_GENERAL, T("PC: PLAN DE ENERGÍA EN AHORRO", "PC: POWER SAVER PLAN"), que, probar, "", 1);
+                    Aviso(CAT_CPU, T("CPU: PLAN DE ENERGÍA EN AHORRO", "CPU: POWER SAVER PLAN"), que, probar, "", 1);
                 }
                 if (!bateriaAvisada && L.Bateria >= 0 && !L.Enchufada)
                 {
@@ -1309,7 +1358,7 @@ namespace Xuca
                     que.Add(T("Estás jugando a batería (" + L.Bateria + " %): la notebook limita mucho el procesador y la placa de video para durar más.", "You are gaming on battery (" + L.Bateria + " %): the laptop heavily limits the CPU and graphics card to last longer."));
                     List<string> probar = new List<string>();
                     probar.Add(T("Enchufala para jugar.", "Plug it in to play."));
-                    Aviso(CAT_GENERAL, T("PC: JUGANDO A BATERÍA", "PC: GAMING ON BATTERY"), que, probar, "", 1);
+                    Aviso(CAT_CPU, T("CPU: JUGANDO A BATERÍA", "CPU: GAMING ON BATTERY"), que, probar, "", 1);
                 }
             }
             juegoAnterior = L.Juego;
@@ -1360,11 +1409,11 @@ namespace Xuca
             Aviso(cat, titulo, que, null, "", 0);
         }
 
-        // Arma el aviso, lo guarda en su categoria (si guarda avisos) y una copia en General
+        // Arma el aviso, lo guarda en su pestaña (si esta prendida) y una copia en registro_pc.txt
         void Aviso(int cat, string titulo, List<string> que, List<string> probar, string ctx, int suma)
         {
-            Asegurar();
-            if (cats == null) return;
+            PcPestana p = Pestanas[cat];
+            if (!p.Activo) return;
             List<string> L = new List<string>();
             L.Add(titulo + ": " + Fecha(DateTime.Now));
             L.Add("");
@@ -1386,18 +1435,9 @@ namespace Xuca
                 L.Add("  " + ctx);
             }
             string texto = string.Join("\r\n", L.ToArray()).TrimEnd();
-            Categoria c = cats[cat];
-            if (!c.Activo) return;
-            foreach (string x in L) c.Log(x);
-            c.Log("");
-            c.Agregar(texto, suma);
-            if (cat != CAT_GENERAL && cats[CAT_GENERAL].Activo)
-            {
-                foreach (string x in L) cats[CAT_GENERAL].Log(x);
-                cats[CAT_GENERAL].Log("");
-                cats[CAT_GENERAL].Agregar(texto, suma);
-            }
-            App.Cambio(this);
+            foreach (string x in L) { p.Log(x); Log(x); }
+            p.Log(""); Log("");
+            p.AgregarAviso(texto, suma);
         }
 
         // Los programas que mas usan el procesador (midiendo 1 s) o la RAM, sumando los que tienen el mismo nombre
@@ -1462,10 +1502,14 @@ namespace Xuca
         public static volatile Version PawnVersion;
         public static bool PawnOk { get { Version v = PawnVersion; return v != null && v >= new Version(2, 0); } }
         public static bool PawnViejo { get { Version v = PawnVersion; return v != null && v < new Version(2, 0); } }
-        const string UrlPawn = "https://github.com/namazso/PawnIO.Setup/releases/latest/download/PawnIO_setup.exe";
-        volatile bool instalando;
-        public bool Instalando { get { return instalando; } }
+        // PawnIO lo instala el usuario desde su origen oficial: Pulso NO baja ni ejecuta el instalador. Hasta la 1.0.3 lo bajaba
+        // de GitHub y lo abria (un .exe sin firma, con administrador, que descarga y lanza el instalador de un driver de kernel):
+        // Defender y SmartScreen saltaban siempre en ese momento. Correr "winget install" desde Pulso tampoco sirve: seria el
+        // mismo patron (Pulso lanzando el instalador de un driver). El usuario lo instala y Pulso lo detecta solo (Vuelta, cada 2 min).
+        public const string WebPawn = "https://pawnio.eu/";
+        public const string WingetPawn = "winget install --id namazso.PawnIO -e";
 
+        // Solo lee el registro (version instalada); nunca instala nada
         public static void LeerPawn()
         {
             Version v = null;
@@ -1486,102 +1530,52 @@ namespace Xuca
             PawnVersion = v;
         }
 
-        // Se llama desde la ventana (boton "Instalar PawnIO")
-        public void InstalarPawn()
+        // Boton "Cómo instalar PawnIO" / "Cómo actualizar PawnIO" de la pestaña CPU: solo explica y abre la pagina oficial
+        public void GuiaPawn()
         {
-            if (instalando) return;
             DialogResult r = MessageBox.Show(
-                T("Se va a bajar el instalador OFICIAL de PawnIO (github.com/namazso/PawnIO.Setup) y abrirlo.\r\n\r\n" +
-                  "PawnIO es un driver gratuito y firmado que deja leer la temperatura y los vatios del procesador y los ventiladores de la placa madre. Es el mismo que usan LibreHardwareMonitor y FanControl.\r\n\r\n" +
-                  "Antes de abrirlo se verifica que tenga la firma digital de su autor (namazso). Se puede desinstalar cuando quieras desde Configuración > Aplicaciones.\r\n\r\n¿Seguir?",
-                  "The OFFICIAL PawnIO installer (github.com/namazso/PawnIO.Setup) will be downloaded and opened.\r\n\r\n" +
-                  "PawnIO is a free, signed driver that allows reading CPU temperature and watts and motherboard fans. It is the same one LibreHardwareMonitor and FanControl use.\r\n\r\n" +
-                  "Before opening it, its author's digital signature (namazso) is verified. You can uninstall it anytime from Settings > Apps.\r\n\r\nContinue?"),
-                Pulso.Nombre, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (r != DialogResult.Yes) return;
-            instalando = true;
-            EstadoPawn = T("Bajando PawnIO...", "Downloading PawnIO...");
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                string error = null;
-                string arch = Path.Combine(Path.GetTempPath(), "PawnIO_setup_" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".exe");
-                try
-                {
-                    ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-                    using (WebClient wc = new WebClient())
-                    {
-                        wc.Headers[HttpRequestHeader.UserAgent] = "Pulso/" + Pulso.Version;
-                        wc.DownloadFile(UrlPawn, arch);
-                    }
-                    byte[] b = File.ReadAllBytes(arch);
-                    if (b.Length < 500000 || b[0] != (byte)'M' || b[1] != (byte)'Z') throw new Exception(T("la descarga vino incompleta", "the download was incomplete"));
-                    if (!FirmadoPorNamazso(arch)) throw new Exception(T("el archivo no tiene la firma digital de PawnIO: no se abrió por seguridad", "the file does not have PawnIO's digital signature: it was not opened for safety"));
-                    EstadoPawn = T("Instalando PawnIO (seguí los pasos de su ventana)...", "Installing PawnIO (follow its window)...");
-                    using (Process p = Process.Start(new ProcessStartInfo(arch, "-install")))
-                        if (p != null) p.WaitForExit();
-                }
-                catch (Exception ex) { error = ex.Message; }
-                finally { try { File.Delete(arch); } catch { } }
-                LeerPawn();
-                instalando = false;
-                EstadoPawn = "";
-                if (error == null && PawnOk) { reabrir = true; despertar.Set(); LogGeneral(T("PawnIO instalado (v", "PawnIO installed (v") + PawnVersion + ")"); }
-                bool ok = error == null && PawnOk;
-                EnUi(delegate
-                {
-                    if (ok) MessageBox.Show(T("Listo: PawnIO quedó instalado. En unos segundos vas a ver la temperatura del procesador.", "Done: PawnIO is installed. You will see the CPU temperature in a few seconds."), Pulso.Nombre, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    else MessageBox.Show(T("No se pudo instalar PawnIO: ", "Could not install PawnIO: ") + (error ?? T("el instalador se cerró sin terminar", "the installer closed without finishing")), Pulso.Nombre, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                });
-            });
+                T("PawnIO es opcional. Sin él, Pulso muestra todo lo demás y, donde Windows la da sin drivers, una temperatura aproximada del procesador. Con él se ven la temperatura y los vatios reales del procesador y los ventiladores de la placa madre.\r\n\r\n" +
+                  "Pulso no lo baja ni lo instala por su cuenta: lo instalás vos desde su origen oficial, de una de estas dos formas:\r\n" +
+                  "   1. Sitio oficial: pawnio.eu (instalador firmado por su autor, namazso).\r\n" +
+                  "   2. En una terminal: " + WingetPawn + "\r\n\r\n" +
+                  "Es normal que el antivirus o SmartScreen avisen al instalarlo: PawnIO es un driver que lee los sensores del procesador a bajo nivel y ese tipo de programa dispara alertas genéricas. Es de código abierto, está firmado y es el mismo que usan LibreHardwareMonitor y FanControl. Se desinstala desde Configuración > Aplicaciones.\r\n\r\n" +
+                  "Sí: abrir el sitio oficial.   No: copiar el comando de winget.   Cancelar: nada.\r\n" +
+                  "Cuando termine de instalarse, Pulso lo detecta solo (en 2 minutos como mucho).",
+                  "PawnIO is optional. Without it, Pulso shows everything else and, where Windows provides it without drivers, an approximate CPU temperature. With it you get the real CPU temperature and watts and the motherboard fans.\r\n\r\n" +
+                  "Pulso does not download or install it on its own: you install it from its official source, in one of these two ways:\r\n" +
+                  "   1. Official site: pawnio.eu (installer signed by its author, namazso).\r\n" +
+                  "   2. In a terminal: " + WingetPawn + "\r\n\r\n" +
+                  "It is normal for your antivirus or SmartScreen to warn while installing it: PawnIO is a driver that reads CPU sensors at a low level, and that kind of program triggers generic alerts. It is open source, signed, and the same one LibreHardwareMonitor and FanControl use. It can be uninstalled from Settings > Apps.\r\n\r\n" +
+                  "Yes: open the official site.   No: copy the winget command.   Cancel: nothing.\r\n" +
+                  "Once it is installed, Pulso detects it by itself (within 2 minutes)."),
+                Pulso.Nombre, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Information);
+            if (r == DialogResult.Yes) { try { Process.Start(WebPawn); } catch { } }
+            else if (r == DialogResult.No) { try { Clipboard.SetText(WingetPawn); } catch { } }
         }
+    }
 
-        // ---------- Verificacion de firma digital (Authenticode) ----------
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        struct WINTRUST_FILE_INFO { public uint cbStruct; [MarshalAs(UnmanagedType.LPWStr)] public string pcwszFilePath; public IntPtr hFile; public IntPtr pgKnownSubject; }
+    // ---------- Una pestaña de hardware (CPU, GPU, Memoria o Discos) ----------
+    // Tiene su propio historial, registro y contador (los de la clase base). Lo que mide sale de MonitorPC.
+    public class PcPestana : Modulo
+    {
+        public readonly MonitorPC Pc;
+        public readonly int Cat;
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        struct WINTRUST_DATA
+        public PcPestana(MonitorPC pc, int cat, string clave, string es, string en, string nombreEs, string nombreEn, string vacioEs, string vacioEn)
         {
-            public uint cbStruct; public IntPtr pPolicyCallbackData; public IntPtr pSIPClientData; public uint dwUIChoice; public uint fdwRevocationChecks;
-            public uint dwUnionChoice; public IntPtr pFile; public uint dwStateAction; public IntPtr hWVTStateData; public IntPtr pwszURLReference;
-            public uint dwProvFlags; public uint dwUIContext; public IntPtr pSignatureSettings;
+            Pc = pc; Cat = cat;
+            Clave = clave; PestEs = es; PestEn = en; TipEs = es; TipEn = en; NombreEs = nombreEs; NombreEn = nombreEn;
+            // Los mismos archivos que tenian las categorias de la pestaña PC (hasta la 1.0.3): el historial se conserva
+            string arch = clave == "memoria" ? "ram" : clave;
+            RegistroArch = "registro_pc_" + arch + ".txt"; HistArch = "historial_pc_" + arch + ".txt";
+            ContEs = "Avisos"; ContEn = "Alerts";
+            VacioEs = vacioEs; VacioEn = vacioEn;
+            ApagadoEs = "Esta pestaña está apagada: no mide ni avisa nada. Prendela con la casilla \"Activado\".";
+            ApagadoEn = "This tab is off: it does not measure or alert anything. Turn it on with the \"Enabled\" box.";
         }
 
-        [DllImport("wintrust.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
-        static extern int WinVerifyTrust(IntPtr hwnd, [MarshalAs(UnmanagedType.LPStruct)] Guid accion, ref WINTRUST_DATA datos);
-
-        static bool FirmadoPorNamazso(string arch)
-        {
-            IntPtr pFile = IntPtr.Zero;
-            try
-            {
-                WINTRUST_FILE_INFO fi = new WINTRUST_FILE_INFO();
-                fi.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_FILE_INFO));
-                fi.pcwszFilePath = arch;
-                pFile = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WINTRUST_FILE_INFO)));
-                Marshal.StructureToPtr(fi, pFile, false);
-                WINTRUST_DATA wd = new WINTRUST_DATA();
-                wd.cbStruct = (uint)Marshal.SizeOf(typeof(WINTRUST_DATA));
-                wd.dwUIChoice = 2;      // sin ventanas
-                wd.dwUnionChoice = 1;   // un archivo
-                wd.pFile = pFile;
-                Guid accion = new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE"); // WINTRUST_ACTION_GENERIC_VERIFY_V2
-                if (WinVerifyTrust(new IntPtr(-1), accion, ref wd) != 0) return false;
-                X509Certificate c = X509Certificate.CreateFromSignedFile(arch);
-                return c != null && c.Subject.IndexOf("O=namazso", StringComparison.OrdinalIgnoreCase) >= 0;
-            }
-            catch { return false; }
-            finally
-            {
-                if (pFile != IntPtr.Zero) { try { Marshal.DestroyStructure(pFile, typeof(WINTRUST_FILE_INFO)); } catch { } Marshal.FreeHGlobal(pFile); }
-            }
-        }
-
-        // ---------- El panel en vivo de la ventana ----------
-        public override Control PanelExtra()
-        {
-            Asegurar();
-            return new PcVista(this);
-        }
+        protected override void Empezar() { Pc.Recalcular(); }
+        protected override void Terminar() { Pc.Recalcular(); }
+        public override Control PanelExtra() { return new PcVista(Pc, this); }
     }
 }

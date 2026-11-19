@@ -1,0 +1,96 @@
+# Al publicar un Release en GitHub (tag "v" + Version de src/App.cs): compila Pulso.exe, lo sube al Release (de ahi se
+# actualiza sola la app), arma el paquete MSIX para la Microsoft Store y los manifiestos de winget, y si estan los secretos
+# los envia solos a la Store y a winget.
+#
+# Secretos (Settings > Secrets and variables > Actions), todos opcionales:
+#   WINGET_TOKEN                     token de GitHub (classic, permiso public_repo) para abrir el PR en microsoft/winget-pkgs
+#   PARTNER_CENTER_TENANT_ID / PARTNER_CENTER_SELLER_ID / PARTNER_CENTER_CLIENT_ID / PARTNER_CENTER_CLIENT_SECRET
+#                                    app de Entra ID asociada a Partner Center (para enviar a la Store)
+# Variables: MSIX_PUBLISHER (el "Publisher" CN=... que muestra Partner Center) y STORE_PRODUCT_ID (el Store ID de Pulso).
+# La primera vez, winget y la Store se dan de alta a mano (ver README, "Publicar una version"); despues va todo solo.
+name: Publicar
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag del release ya creado (por ejemplo v1.0.4)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      TIENE_WINGET: ${{ secrets.WINGET_TOKEN != '' }}
+      TIENE_STORE: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET != '' && vars.STORE_PRODUCT_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Compilar Pulso.exe
+        run: |
+          $v = $env:TAG.TrimStart('v')
+          $codigo = (Select-String src/App.cs -Pattern 'Version = "([\d.]+)"').Matches[0].Groups[1].Value
+          if ($codigo -ne $v) { throw "El tag ($env:TAG) no coincide con Version en src/App.cs ($codigo)" }
+          cmd /c "echo.| .\compilar.bat"
+          if (-not (Test-Path Pulso.exe)) { throw 'compilar.bat no genero Pulso.exe' }
+          "VERSION=$v" >> $env:GITHUB_ENV
+          "SHA256=$((Get-FileHash Pulso.exe -Algorithm SHA256).Hash)" >> $env:GITHUB_ENV
+
+      - name: Subir Pulso.exe al Release
+        run: gh release upload $env:TAG Pulso.exe --clobber
+
+      - name: Armar el MSIX (Microsoft Store)
+        env:
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+        run: |
+          $st = Join-Path $PWD 'msix'   # rutas completas: .NET no sigue el directorio de PowerShell
+          New-Item -ItemType Directory "$st/Assets" -Force | Out-Null
+          Copy-Item Pulso.exe $st
+          Add-Type -AssemblyName System.Drawing
+          $ico = (New-Object System.Drawing.Icon((Join-Path $PWD 'Pulso.ico'), 256, 256)).ToBitmap()
+          foreach ($a in @(@('Square44x44Logo', 44), @('Square150x150Logo', 150), @('StoreLogo', 50))) {
+            $b = New-Object System.Drawing.Bitmap $ico, $a[1], $a[1]; $b.Save("$st/Assets/$($a[0]).png"); $b.Dispose()
+          }
+          $pub = if ($env:MSIX_PUBLISHER) { $env:MSIX_PUBLISHER } else { 'CN=011Xuca' }
+          (Get-Content packaging/msix/AppxManifest.xml -Raw).Replace('__VERSION__', $env:VERSION).Replace('__PUBLISHER__', $pub) | Set-Content "$st/AppxManifest.xml" -Encoding utf8
+          $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" | Sort-Object FullName | Select-Object -Last 1
+          & $makeappx.FullName pack /o /d $st /p Pulso.msix
+          if ($LASTEXITCODE -ne 0) { throw 'makeappx fallo' }
+          gh release upload $env:TAG Pulso.msix --clobber
+
+      - name: Manifiestos de winget
+        run: |
+          New-Item -ItemType Directory winget -Force | Out-Null
+          $fecha = Get-Date -Format 'yyyy-MM-dd'
+          Get-ChildItem packaging/winget/*.yaml | ForEach-Object {
+            (Get-Content $_ -Raw).Replace('__VERSION__', $env:VERSION).Replace('__SHA256__', $env:SHA256).Replace('__FECHA__', $fecha) | Set-Content "winget/$($_.Name)" -Encoding utf8
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winget-manifests
+          path: winget
+
+      - name: Enviar a winget
+        if: env.TIENE_WINGET == 'true'
+        run: |
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe update 011Xuca.Pulso --version $env:VERSION --urls "https://github.com/011Xuca/pulso/releases/download/$env:TAG/Pulso.exe" --token "${{ secrets.WINGET_TOKEN }}" --submit
+
+      - uses: microsoft/setup-msstore-cli@v1
+        if: env.TIENE_STORE == 'true'
+
+      - name: Enviar a la Microsoft Store
+        if: env.TIENE_STORE == 'true'
+        run: |
+          msstore reconfigure --tenantId "${{ secrets.PARTNER_CENTER_TENANT_ID }}" --sellerId "${{ secrets.PARTNER_CENTER_SELLER_ID }}" --clientId "${{ secrets.PARTNER_CENTER_CLIENT_ID }}" --clientSecret "${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}"
+          msstore publish Pulso.msix -id "${{ vars.STORE_PRODUCT_ID }}"

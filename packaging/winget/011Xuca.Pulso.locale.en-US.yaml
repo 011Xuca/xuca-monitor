@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: 011Xuca.Pulso
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: 011Xuca
+PublisherUrl: https://github.com/011Xuca
+PackageName: Pulso
+PackageUrl: https://github.com/011Xuca/pulso
+License: Freeware
+ShortDescription: 'Full PC monitoring from the tray: network latency, USB, in-game performance, Windows errors, hardware sensors and session recording.'
+Description: |-
+  Pulso watches the PC from the system tray and explains what happened and what to try: internet drops and lag (live ping and jitter),
+  USB disconnects, FPS drops while gaming, black screens, blue screens and crashes, and CPU, GPU, memory and drive health
+  (temperatures, clocks, power, VRAM, paging, NVMe/SATA/HDD type, SMART health and read/write speed).
+  It includes a performance overlay and a timed session recorder that reports average FPS, 1% and 0.1% lows, frametimes,
+  bottleneck analysis and a system diagnosis.
+Moniker: pulso
+Tags:
+- monitoring
+- hardware-monitor
+- fps
+- overlay
+- gaming
+- temperature
+- network
+- latency
+- benchmark
+ReleaseNotesUrl: https://github.com/011Xuca/pulso/blob/main/CHANGELOG.md
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
