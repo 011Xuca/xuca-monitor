@@ -281,7 +281,14 @@ namespace Xuca
                     "Could not open the sensors (" + pc.ErrorSensores + "). It retries by itself every minute. Meanwhile what Windows provides is shown (CPU usage and RAM)."), null, null);
             // PawnIO es una mejora opcional: el cartel solo explica, el boton abre la guia (Pulso nunca baja ni ejecuta el instalador)
             bool sinTempReal = !L.CpuTemp.HasValue || L.CpuTempFuente == "ACPI";
-            if (cat == MonitorPC.CAT_CPU && !MonitorPC.PawnOk && (sinTempReal || MonitorPC.PawnViejo))
+            // Antes que ofrecer PawnIO, decir la verdad: sin administrador la libreria no lee el CPU, y con PawnIO instalado el problema no es que falte
+            if (cat == MonitorPC.CAT_CPU && !MonitorPC.EsAdmin && !L.CpuBajoNivel)
+                y = Cartel(g, x, y, w, Nivel.Amarillo, T("Pulso no está corriendo como administrador, por eso no puede leer la temperatura, los vatios ni el voltaje del procesador (sin esos permisos la librería de sensores devuelve ceros). Cerralo y abrilo con \"Ejecutar como administrador\".",
+                    "Pulso is not running as administrator, so it cannot read the CPU temperature, watts or voltage (without those permissions the sensor library returns zeros). Close it and open it with \"Run as administrator\"."), null, null);
+            else if (cat == MonitorPC.CAT_CPU && MonitorPC.PawnOk && MonitorPC.PawnSinDatos && !L.CpuBajoNivel)
+                y = Cartel(g, x, y, w, Nivel.Amarillo, T("PawnIO está instalado (v" + MonitorPC.PawnVer + ") pero no entregó datos del procesador: Pulso reintenta solo. Probá cerrar otros programas de sensores (HWiNFO, FanControl, etc.) o reiniciar la PC.",
+                    "PawnIO is installed (v" + MonitorPC.PawnVer + ") but gave no CPU data: Pulso is retrying by itself. Try closing other sensor programs (HWiNFO, FanControl, etc.) or restarting the PC."), null, null);
+            else if (cat == MonitorPC.CAT_CPU && !MonitorPC.PawnOk && (sinTempReal || MonitorPC.PawnViejo))
             {
                 string txt, boton;
                 if (MonitorPC.PawnViejo)
@@ -454,7 +461,7 @@ namespace Xuca
             int tj = L.CpuTjMax > 0 ? L.CpuTjMax : 100;
             Nivel n = MonitorPC.NivelCpu(L.CpuTemp, tj);
             int ast = AltoStat();
-            int h = S(12) + fTitulo.Height + S(2) + fChica.Height + S(6) + fGrande.Height + S(8) + ast * 2 + fChica.Height + S(14);
+            int h = S(12) + fTitulo.Height + S(2) + fChica.Height + S(6) + fGrande.Height + S(8) + ast * 2 + fChica.Height + S(14) + (L.CpuVoltVid ? fChica.Height + S(6) : 0);
             Rectangle r = new Rectangle(x, y, lw, h);
             Caja(g, r, cTarj, n == Nivel.Rojo ? cRojo : cLinea, n == Nivel.Rojo ? 2 : 1);
             int px = r.X + S(14), py = r.Y + S(12), iw = r.Width - S(28);
@@ -470,7 +477,8 @@ namespace Xuca
             Tx(g, grande, fGrande, L.CpuTemp.HasValue ? De(n) : cGris, px, py);
             int gx = px + Ancho(grande, fGrande) + S(12);
             // Sin PawnIO la libreria no lee temperatura, vatios ni voltaje del CPU: se dice, no se muestra un numero dudoso
-            string reqDriver = T("requiere driver (PawnIO, opcional)", "requires a driver (PawnIO, optional)");
+            // Al lado de la temperatura grande hay poco lugar: con PawnIO sin datos va la frase corta (la larga esta en el cartel de arriba)
+            string reqDriver = MonitorPC.EsAdmin && MonitorPC.PawnOk && MonitorPC.PawnSinDatos ? MonitorPC.SinDriverCorto() : MonitorPC.SinDriverTexto();
             if (L.CpuTemp.HasValue)
             {
                 Tx(g, T("límite (TjMax) ", "limit (TjMax) ") + tj + " °C" + (L.CpuTempFuente == "ACPI" ? T("  ·  aproximada, sin driver (zona térmica de Windows)", "  ·  approximate, no driver (Windows thermal zone)") : ""), fChica, cGris, gx, py + S(6));
@@ -483,13 +491,18 @@ namespace Xuca
             string tVel = L.CpuClockWindows && L.CpuPerfPct.HasValue ? T("Velocidad (Windows: ", "Clock (Windows: ") + (int)Math.Round(L.CpuPerfPct.Value) + T(" % de la base)", " % of base)") : T("Velocidad (prom. / pico)", "Clock (avg / peak)");
             Stat(g, px + sw, py, sw, tVel, Ghz(L.CpuClockProm) + (L.CpuClockMax.HasValue ? " / " + Ghz(L.CpuClockMax) : ""), cTexto);
             py += ast;
-            string reqCorto = T("requiere driver", "needs a driver");   // en letra grande y media columna: la frase entera esta arriba
+            string reqCorto = MonitorPC.SinDriverCorto();   // en letra grande y media columna: la frase entera esta arriba
             Stat(g, px, py, sw, L.CpuPowerWindows ? T("Potencia (Windows, RAPL)", "Power (Windows, RAPL)") : T("Potencia", "Power"), L.CpuPower.HasValue || L.CpuBajoNivel ? Wt(L.CpuPower) : reqCorto, L.CpuPower.HasValue ? cTexto : cGris);
-            Stat(g, px + sw, py, sw, T("Voltaje", "Voltage"), L.CpuVolt.HasValue || L.CpuBajoNivel ? Vt(L.CpuVolt) : reqCorto, L.CpuVolt.HasValue ? cTexto : cGris);
+            Stat(g, px + sw, py, sw, L.CpuVoltVid ? T("Voltaje (VID)", "Voltage (VID)") : T("Voltaje", "Voltage"), L.CpuVolt.HasValue || L.CpuBajoNivel ? Vt(L.CpuVolt) : reqCorto, L.CpuVolt.HasValue ? cTexto : cGris);
             py += ast;
             MonitorPC.Picos pj = pc.PicoJuego;
             Tx(g, Junta(Maximos(pc.PicoSesion.CpuT, pj.Juego != "" && pj.Juego == L.Juego ? pj.CpuT : float.NaN, L.Juego, " °C"),
                 Foto.Hay(pc.PicoSesion.CpuW) ? T("máx. ", "max ") + Wt(pc.PicoSesion.CpuW) : ""), fChica, cGris, new Rectangle(px, py, iw, fChica.Height + S(2)), TextFormatFlags.Left);
+            if (L.CpuVoltVid)
+            {
+                py += fChica.Height + S(6);
+                Tx(g, T("VID: lo que pide el procesador (el mayor de los núcleos), no lo medido.", "VID: what the CPU requests (highest of all cores), not measured."), fChica, cGris, new Rectangle(px, py, iw, fChica.Height + S(2)), TextFormatFlags.Left);
+            }
 
             // Derecha: grafico + uso por nucleo
             int ry = dos ? y : y + h + gap, rx = dos ? x + lw + gap : x, rw = dos ? w - lw - gap : w;
@@ -543,17 +556,31 @@ namespace Xuca
             Nivel peor = n; if (nh > peor) peor = nh; if (nm > peor) peor = nm;
             int ast = AltoStat();
             bool conector = L.GpuPinMaxA.HasValue;
-            bool vram = L.GpuVramUsada.HasValue && L.GpuVramTotal.HasValue;
-            int h = S(12) + fTitulo.Height + S(2) + fChica.Height + S(6) + fGrande.Height + S(8) + ast * 2 + (vram ? fNegrita.Height + S(10) : 0)
-                + (fChica.Height + S(6)) * ((conector ? 2 : 1) + (L.GpuOtras.Count > 0 ? 1 : 0)) + S(8);
+            // Integrada: sin VRAM propia, ventilador ni hot spot; se muestra solo lo que la grafica informa y la memoria compartida (RAM)
+            bool ig = L.GpuIntegrada;
+            bool comp = ig && L.GpuCompUsada.HasValue && L.GpuCompTotal.HasValue;
+            bool vram = comp || (L.GpuVramUsada.HasValue && L.GpuVramTotal.HasValue);
+            string fan = L.GpuFanRpm.HasValue ? ((int)L.GpuFanRpm.Value) + " RPM" : "";
+            if (L.GpuFanPct.HasValue) fan = fan != "" ? fan + " (" + (int)L.GpuFanPct.Value + " %)" : ((int)L.GpuFanPct.Value) + " %";
+            List<string[]> sts = new List<string[]>();
+            sts.Add(new string[] { T("Uso", "Load"), P(L.GpuLoad) });
+            sts.Add(new string[] { T("Núcleo", "Core"), Mhz(L.GpuClock) });
+            if (!ig || L.GpuMemClock.HasValue) sts.Add(new string[] { T("Memoria", "Memory"), Mhz(L.GpuMemClock) });
+            if (!ig || L.GpuPower.HasValue) sts.Add(new string[] { T("Potencia", "Power"), Wt(L.GpuPower) });
+            if (!ig || fan != "") sts.Add(new string[] { T("Ventiladores", "Fans"), fan != "" ? fan : "—" });
+            if (!ig || L.GpuVolt.HasValue) sts.Add(new string[] { T("Voltaje", "Voltage"), Vt(L.GpuVolt) });
+            int filas = (sts.Count + 2) / 3;
+            int h = S(12) + fTitulo.Height + S(2) + fChica.Height + S(6) + fGrande.Height + S(8) + ast * filas + (vram ? fNegrita.Height + S(10) : 0)
+                + (fChica.Height + S(6)) * ((conector ? 2 : 1) + (L.GpuOtras.Count > 0 ? 1 : 0) + (ig ? 2 : 0)) + S(8);
             Rectangle r = new Rectangle(x, y, lw, h);
             Caja(g, r, cTarj, peor == Nivel.Rojo ? cRojo : cLinea, peor == Nivel.Rojo ? 2 : 1);
             int px = r.X + S(14), py = r.Y + S(12), iw = r.Width - S(28);
             Tx(g, L.GpuNombre, fTitulo, cTexto, new Rectangle(px, py, iw - S(110), fTitulo.Height + S(2)), TextFormatFlags.Left);
-            Pastilla(g, r.Right - S(14), py, peor, true);
+            Pastilla(g, r.Right - S(14), py, peor, true, ig && peor == Nivel.Gris ? T("Integrada", "Integrated") : null);
             py += fTitulo.Height + S(2);
             string drv = F.GpuDriver != "" ? T("Driver ", "Driver ") + F.GpuDriver + (F.GpuDriverFecha.HasValue ? " (" + F.GpuDriverFecha.Value.ToString(Modulo.Idioma == "en" ? "MM/dd/yyyy" : "dd/MM/yyyy") + ")" : "") : "";
-            bool viejo = F.GpuDriverFecha.HasValue && (DateTime.Now - F.GpuDriverFecha.Value).TotalDays > 365;
+            // En una integrada (AMD/Intel) un driver "viejo" no se puede dar por desactualizado: las Vega y Radeon Graphics de procesadores viejos ya no reciben versiones nuevas y Windows no dice si hay otra
+            bool viejo = !ig && F.GpuDriverFecha.HasValue && (DateTime.Now - F.GpuDriverFecha.Value).TotalDays > 365;
             Tx(g, drv + (viejo ? T("  — tiene más de un año, conviene actualizarlo", "  — over a year old, worth updating") : ""), fChica, viejo ? cAmarillo : cGris, new Rectangle(px, py, iw, fChica.Height + S(2)), TextFormatFlags.Left);
             py += fChica.Height + S(6);
             string grande = Gc(L.GpuTemp);
@@ -570,27 +597,33 @@ namespace Xuca
             }
             if (L.GpuMemTemp.HasValue)
                 Tx(g, T("Memoria ", "Memory ") + Gc(L.GpuMemTemp), fNegrita, De(nm), gx, lineaY);
+            else if (ig && !L.GpuTemp.HasValue)
+                Tx(g, T("Sin temperatura (gráfica integrada)", "No temperature (integrated graphics)"), fChica, cGris, gx, lineaY + S(4));
             py += fGrande.Height + S(8);
             int sw = iw / 3;
-            Stat(g, px, py, sw, T("Uso", "Load"), P(L.GpuLoad), cTexto);
-            Stat(g, px + sw, py, sw, T("Núcleo", "Core"), Mhz(L.GpuClock), cTexto);
-            Stat(g, px + sw * 2, py, sw, T("Memoria", "Memory"), Mhz(L.GpuMemClock), cTexto);
-            py += ast;
-            Stat(g, px, py, sw, T("Potencia", "Power"), Wt(L.GpuPower), cTexto);
-            string fan = L.GpuFanRpm.HasValue ? ((int)L.GpuFanRpm.Value) + " RPM" : "";
-            if (L.GpuFanPct.HasValue) fan = fan != "" ? fan + " (" + (int)L.GpuFanPct.Value + " %)" : ((int)L.GpuFanPct.Value) + " %";
-            Stat(g, px + sw, py, sw, T("Ventiladores", "Fans"), fan != "" ? fan : "—", cTexto);
-            Stat(g, px + sw * 2, py, sw, T("Voltaje", "Voltage"), Vt(L.GpuVolt), cTexto);
-            py += ast;
-            // VRAM
+            for (int i = 0; i < sts.Count; i++)
+                Stat(g, px + sw * (i % 3), py + ast * (i / 3), sw, sts[i][0], sts[i][1], cTexto);
+            py += ast * filas;
+            // VRAM (o, en una integrada, memoria compartida con la RAM)
             if (vram)
             {
-                float pct = L.GpuVramUsada.Value * 100f / L.GpuVramTotal.Value;
-                string vt = "VRAM " + Gb(L.GpuVramUsada.Value / 1024.0) + T(" de ", " of ") + Gb(L.GpuVramTotal.Value / 1024.0);
+                float vu = comp ? L.GpuCompUsada.Value : L.GpuVramUsada.Value, vtot = comp ? L.GpuCompTotal.Value : L.GpuVramTotal.Value;
+                float pct = vu * 100f / vtot;
+                string vt = (comp ? T("Memoria compartida ", "Shared memory ") : "VRAM ") + Gb(vu / 1024.0) + T(" de ", " of ") + Gb(vtot / 1024.0);
                 Tx(g, vt, fNegrita, cTexto, px, py);
                 int vw = Ancho(vt, fNegrita) + S(10);
-                Barra(g, new Rectangle(px + vw, py + (fNegrita.Height - S(8)) / 2, iw - vw, S(8)), pct, pct >= 97 ? cRojo : pct >= 90 ? cAmarillo : cAcento);
+                Barra(g, new Rectangle(px + vw, py + (fNegrita.Height - S(8)) / 2, iw - vw, S(8)), pct, pct >= 97 && !ig ? cRojo : pct >= 90 && !ig ? cAmarillo : cAcento);
                 py += fNegrita.Height + S(10);
+            }
+            if (ig)
+            {
+                Tx(g, comp ? T("Usa la RAM del sistema: no tiene VRAM propia ni ventilador.", "It uses system RAM: it has no VRAM of its own and no fan.")
+                           : T("Usa la RAM del sistema: sin VRAM propia ni ventilador; no informa memoria compartida.", "It uses system RAM: no VRAM of its own, no fan; shared memory not reported."),
+                    fChica, cGris, new Rectangle(px, py, iw, fChica.Height + S(2)), TextFormatFlags.Left);
+                py += fChica.Height + S(6);
+                Tx(g, T("Lo que no aparece (—) no lo informa esta gráfica integrada; no es un problema del driver.", "Whatever is missing (—) is not reported by this integrated graphics chip; it is not a driver problem."),
+                    fChica, cGris, new Rectangle(px, py, iw, fChica.Height + S(2)), TextFormatFlags.Left);
+                py += fChica.Height + S(6);
             }
             if (conector)
             {

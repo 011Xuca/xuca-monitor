@@ -48,7 +48,7 @@ namespace Xuca
             new OvVar("cpu.temp", "CPU: temperatura (°C)", "CPU: temperature (°C)", "0"),
             new OvVar("cpu.power", "CPU: consumo (W)", "CPU: power (W)", "0"),
             new OvVar("cpu.clock", "CPU: velocidad (MHz)", "CPU: clock (MHz)", "0"),
-            new OvVar("cpu.volt", "CPU: voltaje (V)", "CPU: voltage (V)", "0.00"),
+            new OvVar("cpu.volt", "CPU: voltaje (V; en Ryzen 7000/9000 es el VID que pide el procesador)", "CPU: voltage (V; on Ryzen 7000/9000 it is the VID the processor requests)", "0.00"),
             new OvVar("gpu.name", "Nombre de la placa de video", "Graphics card name", ""),
             new OvVar("gpu.load", "GPU: uso (%)", "GPU: usage (%)", "0"),
             new OvVar("gpu.temp", "GPU: temperatura del núcleo (°C)", "GPU: core temperature (°C)", "0"),
@@ -60,6 +60,7 @@ namespace Xuca
             new OvVar("gpu.volt", "GPU: voltaje (V)", "GPU: voltage (V)", "0.00"),
             new OvVar("gpu.vram", "GPU: VRAM usada (MB)", "GPU: VRAM used (MB)", "0"),
             new OvVar("gpu.vramtotal", "GPU: VRAM total (MB)", "GPU: VRAM total (MB)", "0"),
+            new OvVar("gpu.vramshared", "GPU integrada: memoria compartida usada (MB)", "Integrated GPU: shared memory used (MB)", "0"),
             new OvVar("gpu.vrampct", "GPU: VRAM usada (%)", "GPU: VRAM used (%)", "0"),
             new OvVar("gpu.fan", "GPU: ventilador (RPM)", "GPU: fan (RPM)", "0"),
             new OvVar("gpu.fanpct", "GPU: ventilador (%)", "GPU: fan (%)", "0"),
@@ -1092,7 +1093,7 @@ namespace Xuca
                 Num(datos, "cpu.clock", l.CpuClockProm); Num(datos, "cpu.volt", l.CpuVolt);
                 Num(datos, "gpu.load", l.GpuLoad); Num(datos, "gpu.temp", l.GpuTemp); Num(datos, "gpu.hot", l.GpuHot); Num(datos, "gpu.memtemp", l.GpuMemTemp);
                 Num(datos, "gpu.power", l.GpuPower); Num(datos, "gpu.clock", l.GpuClock); Num(datos, "gpu.memclock", l.GpuMemClock); Num(datos, "gpu.volt", l.GpuVolt);
-                Num(datos, "gpu.vram", l.GpuVramUsada); Num(datos, "gpu.vramtotal", l.GpuVramTotal);
+                Num(datos, "gpu.vram", l.GpuVramUsada); Num(datos, "gpu.vramtotal", l.GpuVramTotal); Num(datos, "gpu.vramshared", l.GpuCompUsada);
                 if (l.GpuVramUsada.HasValue && l.GpuVramTotal.HasValue && l.GpuVramTotal.Value > 0) datos.N["gpu.vrampct"] = l.GpuVramUsada.Value * 100.0 / l.GpuVramTotal.Value;
                 Num(datos, "gpu.fan", l.GpuFanRpm); Num(datos, "gpu.fanpct", l.GpuFanPct);
                 if (l.RamUso >= 0) datos.N["ram.load"] = l.RamUso;

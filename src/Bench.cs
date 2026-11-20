@@ -246,7 +246,7 @@ namespace Xuca
             L.Add(T("SENSORES (promedio / máximo):", "SENSORS (average / max):"));
             // Lo que no se pudo medir se dice (no se pone "-" como si fuera un dato): sin PawnIO no hay temperatura ni vatios del CPU
             bool cpuDriver = false, cpuAprox = false; foreach (Punto m in ms) { if (m.CpuBajoNivel) cpuDriver = true; if (m.CpuTAprox && m.CpuT.HasValue) cpuAprox = true; }
-            string sinDriver = T("requiere driver (PawnIO, opcional)", "requires a driver (PawnIO, optional)");
+            string sinDriver = MonitorPC.SinDriverTexto();
             if (cT.Count + cU.Count + cF.Count + cW.Count > 0)
                 L.Add("  CPU" + (cpu != "" ? " (" + cpu + ")" : "") + ": "
                     + (cT.Count > 0 ? F0(Prom(cT)) + " / " + F0(Max(cT)) + " °C" + (cpuAprox ? T(" (aproximada: zona térmica de Windows)", " (approximate: Windows thermal zone)") : "") : T("temperatura: ", "temperature: ") + (cpuDriver ? T("sin dato", "no data") : sinDriver))
@@ -266,7 +266,8 @@ namespace Xuca
             List<float> pag = Col(ms, delegate (Punto m) { return m.Paginas; }), pagUso = Col(ms, delegate (Punto m) { return m.PagUso; });
             if (pag.Count > 0) L.Add(T("  Paginación: ", "  Paging: ") + F0(Prom(pag)) + " / " + F0(Max(pag)) + T(" páginas/s leídas del disco", " pages/s read from disk") + (pagUso.Count > 0 ? T("   ·   archivo de paginación al ", "   ·   page file at ") + F0(Max(pagUso)) + " %" : ""));
             else L.Add(T("  Paginación: sin datos (prendé la pestaña Memoria para medirla).", "  Paging: no data (turn on the Memory tab to measure it)."));
-            if (cT.Count == 0) info.Add(T("Sin temperatura del procesador: este equipo no la da sin drivers. Es opcional: en la pestaña CPU, \"Cómo instalar PawnIO\".", "No CPU temperature: this PC does not report it without drivers. It is optional: in the CPU tab, \"How to install PawnIO\"."));
+            if (cT.Count == 0 && (!MonitorPC.EsAdmin || MonitorPC.PawnSinDatos)) info.Add(T("Sin temperatura del procesador: " + sinDriver + ".", "No CPU temperature: " + sinDriver + "."));
+            else if (cT.Count == 0) info.Add(T("Sin temperatura del procesador: este equipo no la da sin drivers. Es opcional: en la pestaña CPU, \"Cómo instalar PawnIO\".", "No CPU temperature: this PC does not report it without drivers. It is optional: in the CPU tab, \"How to install PawnIO\"."));
 
             // ---- Problemas a partir de los sensores ----
             int cpuTerm = Frenadas(ms, delegate (Punto m) { return m.CpuMhz; }, delegate (Punto m) { return m.CpuU; }, delegate (Punto m) { return m.CpuT; }, limCpu, true);

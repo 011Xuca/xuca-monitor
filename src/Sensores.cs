@@ -27,6 +27,24 @@ namespace Xuca
             SinHistorial();
         }
 
+        // Para el registro: cuantos sensores de cada tipo dio la libreria para el CPU y los dos valores clave
+        public string Diagnostico()
+        {
+            IHardware cpu = null;
+            foreach (IHardware h in pc.Hardware) if (h.HardwareType == HardwareType.Cpu) { cpu = h; break; }
+            if (cpu == null) return "CPU: la librería no encontró el procesador / the library found no CPU.";
+            int t = 0, w = 0, v = 0, c = 0, l = 0;
+            foreach (ISensor s in cpu.Sensors)
+            {
+                if (s.SensorType == SensorType.Temperature) t++; else if (s.SensorType == SensorType.Power) w++;
+                else if (s.SensorType == SensorType.Voltage) v++; else if (s.SensorType == SensorType.Clock) c++; else if (s.SensorType == SensorType.Load) l++;
+            }
+            float? tctl = V(Exacto(cpu, SensorType.Temperature, "Core (Tctl/Tdie)", "Core (Tctl)", "Core (Tdie)", "CPU Package", "Core Max"));
+            float? pkg = V(Exacto(cpu, SensorType.Power, "CPU Package", "Package"));
+            Func<float?, string> f = delegate (float? x) { return x.HasValue ? x.Value.ToString("0.0", CultureInfo.InvariantCulture) : "n/d"; };
+            return "CPU '" + cpu.Name + "': temp=" + t + " pot=" + w + " volt=" + v + " clock=" + c + " load=" + l + "; Tctl/Package=" + f(tctl) + " °C; Package=" + f(pkg) + " W.";
+        }
+
         public void Cerrar()
         {
             try { if (pc != null) pc.Close(); } catch { }
@@ -147,6 +165,11 @@ namespace Xuca
             // (VID 1.55 V en Ryzen): visto en esta PC sin acceso al driver. Solo el uso (de Windows) es real.
             L.CpuBajoNivel = L.CpuTemp.HasValue || L.CpuPower.HasValue;
             L.CpuVolt = L.CpuBajoNivel ? V(Exacto(cpu, SensorType.Voltage, "CPU Core", "Core (SVI2 TFN)")) : null;
+            // Zen 4/5 no tiene voltaje real: la libreria da "Core #N VID" por nucleo. Se usa el maximo (lo que mas pide el procesador) y se marca como VID
+            if (L.CpuBajoNivel && !L.CpuVolt.HasValue)
+                foreach (ISensor s in cpu.Sensors)
+                    if (s.SensorType == SensorType.Voltage && s.Value.HasValue && s.Value.Value > 0 && s.Name != null && s.Name.EndsWith("VID", StringComparison.Ordinal)
+                        && (!L.CpuVolt.HasValue || s.Value.Value > L.CpuVolt.Value)) { L.CpuVolt = s.Value; L.CpuVoltVid = true; }
 
             // Velocidad: promedio y maximo de los nucleos (sin "Bus Speed" ni los promedios que ya calcula la libreria)
             float suma = 0, max = 0; int n = 0;
@@ -195,6 +218,16 @@ namespace Xuca
             return mejor;
         }
 
+        static readonly Regex RxIgpu = new Regex(@"UHD|Iris|HD Graphics|Radeon\(TM\) Graphics|Radeon Graphics|Vega (3|6|8|10|11)\b|Radeon \d{3}M", RegexOptions.IgnoreCase);
+        static readonly Regex RxDedicada = new Regex(@"NVIDIA|GeForce|RTX|GTX|Radeon RX|Radeon Pro|Arc\b", RegexOptions.IgnoreCase);
+        // Intel que no sea Arc, o AMD con nombre de integrada (Vega 56/64 y Radeon RX son dedicadas)
+        static bool EsIntegrada(IHardware h)
+        {
+            string n = h.Name ?? "";
+            if (h.HardwareType == HardwareType.GpuNvidia || RxDedicada.IsMatch(n)) return false;
+            return h.HardwareType == HardwareType.GpuIntel || RxIgpu.IsMatch(n);
+        }
+
         void LeerGpu(IHardware gpu, Lectura L)
         {
             L.GpuNombre = gpu.Name ?? "";
@@ -212,6 +245,11 @@ namespace Xuca
             L.GpuVramUsada = V(Exacto(gpu, SensorType.SmallData, "GPU Memory Used", "D3D Dedicated Memory Used"));
             L.GpuVramTotal = V(Exacto(gpu, SensorType.SmallData, "GPU Memory Total", "D3D Dedicated Memory Total"));
             if (L.GpuVramTotal.HasValue && L.GpuVramTotal.Value < 1) L.GpuVramTotal = null;
+            // Integrada (Vega/Radeon Graphics, UHD/Iris): sin VRAM propia ni ventilador; usa la RAM del sistema (memoria compartida de D3D)
+            L.GpuIntegrada = EsIntegrada(gpu);
+            L.GpuCompUsada = V(Exacto(gpu, SensorType.SmallData, "D3D Shared Memory Used"));
+            L.GpuCompTotal = V(Exacto(gpu, SensorType.SmallData, "D3D Shared Memory Total"));
+            if (L.GpuCompTotal.HasValue && L.GpuCompTotal.Value < 1) L.GpuCompTotal = null;
 
             foreach (ISensor s in gpu.Sensors)
             {

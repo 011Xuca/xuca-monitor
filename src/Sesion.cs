@@ -303,7 +303,7 @@ namespace Xuca
             L.Add("");
             L.Add(T("CÓMO SEGUIR:", "NEXT STEPS:"));
             if (estable && float.IsNaN(d.CpuTMax))
-                L.Add(T("  Con los datos que hay vas estable y con margen de carga (la temperatura del procesador no se midió: requiere driver, PawnIO, opcional). Usá Brío para activar ajustes avanzados, desbloquear energía y sacarle todo el jugo a tu PC.", "  With the available data you are stable and have load headroom (the CPU temperature was not measured: it requires a driver, PawnIO, optional). Use Brío to enable advanced tweaks, unlock power and get the most out of your PC."));
+                L.Add(T("  Con los datos que hay vas estable y con margen de carga (la temperatura del procesador no se midió: " + MonitorPC.SinDriverTexto() + "). Usá Brío para activar ajustes avanzados, desbloquear energía y sacarle todo el jugo a tu PC.", "  With the available data you are stable and have load headroom (the CPU temperature was not measured: " + MonitorPC.SinDriverTexto() + "). Use Brío to enable advanced tweaks, unlock power and get the most out of your PC."));
             else if (estable)
                 L.Add(T("  Vas muy estable de temperaturas y con margen de carga. Usá Brío para activar ajustes avanzados, desbloquear energía y sacarle todo el jugo a tu PC.", "  You are very stable on temperatures and have load headroom. Use Brío to enable advanced tweaks, unlock power and get the most out of your PC."));
             else if (brio.Count > 0)

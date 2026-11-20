@@ -20,6 +20,7 @@ using System.IO;
 using System.Management;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -48,6 +49,7 @@ namespace Xuca
         public bool HaySensores;
         public string CpuNombre = "", CpuTempFuente = "";
         public float? CpuTemp, CpuTempMaxLib, CpuLoad, CpuPower, CpuClockProm, CpuClockMax, CpuVolt;
+        public bool CpuVoltVid;   // CpuVolt es el VID (lo que pide el procesador), no un voltaje medido
         public int CpuTjMax;
         // Sin driver (Windows): % de rendimiento (frecuencia / base) y % de limite que impone el firmware (100 = sin limite)
         public float? CpuPerfPct, CpuLimitePct;
@@ -56,8 +58,8 @@ namespace Xuca
         public readonly List<float> CpuNucleos = new List<float>();
         public string GpuNombre = "", GpuPinNombre = "";
         public readonly List<string> GpuOtras = new List<string>();
-        public bool GpuNvidia, GpuAmd;
-        public float? GpuTemp, GpuHot, GpuMemTemp, GpuLoad, GpuPower, GpuClock, GpuMemClock, GpuVolt, GpuVramUsada, GpuVramTotal, GpuFanRpm, GpuFanPct, GpuPinMaxA;
+        public bool GpuNvidia, GpuAmd, GpuIntegrada;
+        public float? GpuTemp, GpuHot, GpuMemTemp, GpuLoad, GpuPower, GpuClock, GpuMemClock, GpuVolt, GpuVramUsada, GpuVramTotal, GpuCompUsada, GpuCompTotal, GpuFanRpm, GpuFanPct, GpuPinMaxA;
         public float RamUso = -1;
         public double RamUsadaGB, RamTotalGB;
         public float? DimmTemp;
@@ -208,12 +210,15 @@ namespace Xuca
         [MethodImpl(MethodImplOptions.NoInlining)] static void CerrarSens(object s) { ((Sensores)s).Cerrar(); }
         [MethodImpl(MethodImplOptions.NoInlining)] static void LeerSens(object s, Lectura L) { ((Sensores)s).Leer(L); }
         [MethodImpl(MethodImplOptions.NoInlining)] static void LeerFijaSens(object s, InfoFija f) { ((Sensores)s).LeerFija(f); }
+        [MethodImpl(MethodImplOptions.NoInlining)] static string DiagSens(object s) { return ((Sensores)s).Diagnostico(); }
 
         void Vuelta()
         {
             object sens = null;
             DateTime proximoIntento = DateTime.MinValue, proximoPlan = DateTime.MinValue;
             int n = 0;
+            // Autocuracion: PawnIO instalado y con administrador pero la libreria lee ceros (p. ej. abrio antes de que el driver estuviera listo)
+            int sinBajo = 0, intentos = 0; long aperturaMs = 0; bool diagPend = false;
             try
             {
                 InfoFija f = new InfoFija();
@@ -228,7 +233,9 @@ namespace Xuca
                     {
                         try
                         {
+                            Stopwatch sw = Stopwatch.StartNew();
                             sens = AbrirSens();
+                            aperturaMs = sw.ElapsedMilliseconds; diagPend = true;
                             ErrorSensores = null;
                             try { LeerFijaSens(sens, f); } catch { }
                         }
@@ -254,6 +261,32 @@ namespace Xuca
                     {
                         try { LeerSens(sens, L); }
                         catch (Exception ex) { LogErr("leer:" + ex.GetType().Name, T("Error leyendo sensores: ", "Error reading sensors: ") + ex.Message); }
+                    }
+                    if (sens != null && L.HaySensores)
+                    {
+                        // Constancia en el registro, una vez por apertura: para diagnosticar sin adivinar
+                        if (diagPend)
+                        {
+                            diagPend = false;
+                            string d = ""; try { d = DiagSens(sens); } catch (Exception ex) { d = ex.Message; }
+                            LogGeneral(T("Sensores abiertos en " + aperturaMs + " ms. Administrador: " + (EsAdmin ? "sí" : "NO") + ". PawnIO: " + (PawnVersion != null ? "v" + PawnVer : "no detectado") + ". " + d,
+                                         "Sensors opened in " + aperturaMs + " ms. Administrator: " + (EsAdmin ? "yes" : "NO") + ". PawnIO: " + (PawnVersion != null ? "v" + PawnVer : "not detected") + ". " + d));
+                        }
+                        bool sinLectura = PawnOk && EsAdmin && !L.CpuBajoNivel;
+                        if (!sinLectura) { sinBajo = 0; PawnSinDatos = false; if (L.CpuBajoNivel) intentos = 0; }
+                        else
+                        {
+                            sinBajo++;
+                            if (sinBajo >= 2) PawnSinDatos = true;
+                            // Vueltas de 2 s: reintenta a los 10 s, 20 s y 40 s; despues cada 2 min
+                            int umbral = intentos == 0 ? 5 : intentos == 1 ? 10 : intentos == 2 ? 20 : 60;
+                            if (sinBajo >= umbral)
+                            {
+                                sinBajo = 0; intentos++; reabrir = true;
+                                LogErr("pawnsd" + Math.Min(intentos, 4), T("PawnIO v" + PawnVer + " instalado pero la librería no leyó el CPU: reabriendo (intento " + intentos + ")",
+                                                                          "PawnIO v" + PawnVer + " is installed but the library did not read the CPU: reopening (attempt " + intentos + ")"));
+                            }
+                        }
                     }
                     Propias(L, f);
                     Ultima = L;
@@ -1094,8 +1127,8 @@ namespace Xuca
                     if (cae)
                         que.Add(T("Con carga alta bajó de " + Ghz(cpuRefSinTemp) + " a " + Ghz(L.CpuClockProm) + " (frecuencia según Windows).",
                                   "Under high load it dropped from " + Ghz(cpuRefSinTemp) + " to " + Ghz(L.CpuClockProm) + " (clock according to Windows)."));
-                    que.Add(T("Es un indicio, no una temperatura: puede ser calor o un límite de energía (plan de energía, BIOS, notebook a batería). La temperatura del procesador requiere driver (PawnIO, opcional).",
-                              "This is a hint, not a temperature: it may be heat or a power limit (power plan, BIOS, laptop on battery). The CPU temperature requires a driver (PawnIO, optional)."));
+                    que.Add(T("Es un indicio, no una temperatura: puede ser calor o un límite de energía (plan de energía, BIOS, notebook a batería). La temperatura del procesador " + SinDriverTexto() + ".",
+                              "This is a hint, not a temperature: it may be heat or a power limit (power plan, BIOS, laptop on battery). The CPU temperature " + SinDriverTexto() + "."));
                     List<string> probar = new List<string>();
                     probar.Add(T("Revisá el plan de energía (abajo) y que la notebook esté enchufada.", "Check the power plan (below) and that the laptop is plugged in."));
                     probar.Add(T("Limpiá el polvo del cooler y fijate que el ventilador del procesador gire.", "Clean the dust from the cooler and check that the CPU fan spins."));
@@ -1210,7 +1243,7 @@ namespace Xuca
                 }
             }
             // VRAM llena con la placa trabajando: tirones aunque los FPS promedio den bien
-            if (L.GpuVramUsada.HasValue && L.GpuVramTotal.HasValue && L.GpuLoad.HasValue)
+            if (!L.GpuIntegrada && L.GpuVramUsada.HasValue && L.GpuVramTotal.HasValue && L.GpuLoad.HasValue) // una integrada usa la RAM del sistema a proposito: no es "llena"
             {
                 Regla r = R("gpu_vram");
                 int c = r.Paso(L.GpuVramUsada.Value >= L.GpuVramTotal.Value * 0.97f && L.GpuLoad.Value >= 50, 10, 10);
@@ -1500,6 +1533,25 @@ namespace Xuca
         // PawnIO: el driver que hace falta para la temperatura del procesador y los ventiladores de la placa
         // =====================================================================================================
         public static volatile Version PawnVersion;
+        // Pulso necesita administrador para que la libreria lea el CPU (sin admin da todo 0). El manifiesto lo pide, pero se verifica de verdad.
+        public static readonly bool EsAdmin = LeerAdmin();
+        static bool LeerAdmin() { try { using (WindowsIdentity id = WindowsIdentity.GetCurrent()) return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator); } catch { return true; } }
+        // PawnIO esta instalado y con administrador, pero la libreria sigue sin leer el CPU (lo ve Vuelta, que reabre los sensores)
+        public static volatile bool PawnSinDatos;
+        public static string PawnVer { get { Version v = PawnVersion; return v == null ? "" : v.Revision > 0 ? v.ToString() : v.ToString(3); } }   // 2.2.0.0 -> 2.2.0
+        // Por que no hay temperatura ni vatios del CPU: lo verdadero segun el caso (no siempre es "falta PawnIO")
+        public static string SinDriverTexto()
+        {
+            if (!EsAdmin) return T("requiere administrador (Pulso no está elevado)", "requires administrator (Pulso is not elevated)");
+            if (PawnOk && PawnSinDatos) return T("PawnIO v" + PawnVer + " instalado, pero no entregó datos del CPU (reintentando)", "PawnIO v" + PawnVer + " is installed but gave no CPU data (retrying)");
+            return T("requiere driver (PawnIO, opcional)", "requires a driver (PawnIO, optional)");
+        }
+        public static string SinDriverCorto()
+        {
+            if (!EsAdmin) return T("requiere administrador", "needs administrator");
+            if (PawnOk && PawnSinDatos) return T("sin datos (PawnIO)", "no data (PawnIO)");
+            return T("requiere driver", "needs a driver");
+        }
         public static bool PawnOk { get { Version v = PawnVersion; return v != null && v >= new Version(2, 0); } }
         public static bool PawnViejo { get { Version v = PawnVersion; return v != null && v < new Version(2, 0); } }
         // PawnIO lo instala el usuario desde su origen oficial: Pulso NO baja ni ejecuta el instalador. Hasta la 1.0.3 lo bajaba

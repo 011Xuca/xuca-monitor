@@ -214,7 +214,7 @@ namespace Xuca
         CheckBox chkInicio, chkActivo;
         readonly List<Button> botones = new List<Button>();
         readonly Dictionary<Modulo, Button> pestanas = new Dictionary<Modulo, Button>();
-        Button bEsc, bReg, bLimp, bTema, bIdioma, bKofi, bOver;
+        Button bEsc, bReg, bLimp, bTema, bIdioma, bKofi, bOver, bNov;
         FlowLayoutPanel arriba, fila2;
         Panel medio, caja;
 
@@ -714,6 +714,7 @@ namespace Xuca
                 bTema.Text = TextoTema();
                 bIdioma.Text = T("English", "Español");
                 bOver.Text = T("Overlay de rendimiento", "Performance overlay");
+                bNov.Text = T("Novedades", "What's new");
                 bKofi.Text = T("♥ Apoyar en Ko-fi", "♥ Support on Ko-fi");
                 chkActivo.Text = T("Activado", "Enabled");
                 chkActivo.Checked = actual.Activo;
@@ -874,6 +875,9 @@ namespace Xuca
                 if (Win10) OvAjustes.Mostrar();
                 else MessageBox.Show(SoloWin10("El overlay de rendimiento y la grabación de sesión", "The performance overlay and session recording"), Nombre, MessageBoxButtons.OK, MessageBoxIcon.Information);
             });
+
+            // Novedades: la ultima version del changelog (embebido) en el idioma de la app; el resto, en GitHub
+            bNov = Boton(arriba, delegate { Novedades.Mostrar(oscuroAhora, icono); });
 
             // Ko-fi: celeste fijo, igual que en el Xuca OPtimizer (no cambia con el tema)
             bKofi = Boton(arriba, delegate { try { Process.Start("https://ko-fi.com/011xuca"); } catch { } });
