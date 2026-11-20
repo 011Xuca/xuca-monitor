@@ -211,10 +211,11 @@ namespace Xuca
         TextBox tb;
         Label estado;
         Panel panelExtra;
-        CheckBox chkInicio, chkActivo;
+        CheckBox chkActivo;
         readonly List<Button> botones = new List<Button>();
         readonly Dictionary<Modulo, Button> pestanas = new Dictionary<Modulo, Button>();
-        Button bEsc, bReg, bLimp, bTema, bIdioma, bKofi, bOver, bNov;
+        Button bReg, bLimp, bAj, bKofi, bOver, bNov;
+        ContextMenuStrip menuAj;
         FlowLayoutPanel arriba, fila2;
         Panel medio, caja;
 
@@ -641,11 +642,47 @@ namespace Xuca
             catch { return true; }
         }
 
-        string TextoTema()
+        ToolStripMenuItem Opc(string txt, bool marcada, EventHandler click)
         {
-            if (tema == "claro") return T("Tema: Claro", "Theme: Light");
-            if (tema == "oscuro") return T("Tema: Oscuro", "Theme: Dark");
-            return T("Tema: Sistema", "Theme: System");
+            ToolStripMenuItem m = new ToolStripMenuItem(txt);
+            m.Checked = marcada;
+            m.Click += click;
+            return m;
+        }
+        void ArmarMenuAjustes()
+        {
+            menuAj.Items.Clear();
+            ToolStripMenuItem idi = new ToolStripMenuItem(T("Idioma", "Language"));
+            idi.DropDownItems.Add(Opc("Español", Modulo.Idioma == "es", delegate { Modulo.Idioma = "es"; GuardarAjuste("idioma", "es"); ActualizarTextos(); }));
+            idi.DropDownItems.Add(Opc("English", Modulo.Idioma == "en", delegate { Modulo.Idioma = "en"; GuardarAjuste("idioma", "en"); ActualizarTextos(); }));
+            ToolStripMenuItem tem = new ToolStripMenuItem(T("Tema", "Theme"));
+            tem.DropDownItems.Add(Opc(T("Sistema", "System"), tema == "sistema", delegate { tema = "sistema"; GuardarAjuste("tema", tema); AplicarTema(); }));
+            tem.DropDownItems.Add(Opc(T("Claro", "Light"), tema == "claro", delegate { tema = "claro"; GuardarAjuste("tema", tema); AplicarTema(); }));
+            tem.DropDownItems.Add(Opc(T("Oscuro", "Dark"), tema == "oscuro", delegate { tema = "oscuro"; GuardarAjuste("tema", tema); AplicarTema(); }));
+            menuAj.Items.Add(idi);
+            menuAj.Items.Add(tem);
+            menuAj.Items.Add(Opc(T("Iniciar con Windows", "Start with Windows"), TareaExiste(), delegate
+            {
+                bool quiere = !TareaExiste();
+                if (quiere) { try { TareaCrear(); } catch { } }
+                else { try { TareaBorrar(); } catch { } }
+                if (quiere && !TareaExiste()) MessageBox.Show(T("No se pudo activar el inicio con Windows:\n", "Could not enable start with Windows:\n") + UltimoError, Nombre);
+            }));
+            if (Win10)
+            {
+                menuAj.Items.Add(Opc(T("Overlay: exportar estilo...", "Overlay: export style..."), false, delegate { OvMgr.ExportarEstilo(fv); }));
+                menuAj.Items.Add(Opc(T("Overlay: importar estilo...", "Overlay: import style..."), false, delegate { OvMgr.ImportarEstilo(fv); }));
+            }
+            // Mismos colores que la ventana (el menu no hereda el tema solo)
+            Color bg = oscuroAhora ? Color.FromArgb(28, 32, 39) : Color.White;
+            Color fg = oscuroAhora ? Color.White : Color.FromArgb(17, 24, 39);
+            menuAj.BackColor = bg; menuAj.ForeColor = fg;
+            foreach (ToolStripMenuItem m in menuAj.Items)
+            {
+                m.BackColor = bg; m.ForeColor = fg;
+                m.DropDown.BackColor = bg;
+                foreach (ToolStripItem d in m.DropDownItems) { d.BackColor = bg; d.ForeColor = fg; }
+            }
         }
 
         // Para que los paneles propios de cada modulo (PC) usen los mismos colores
@@ -675,7 +712,7 @@ namespace Xuca
             }
             caja.BackColor = tarj; tb.BackColor = tarj; tb.ForeColor = texto;
             estado.BackColor = fondo; estado.ForeColor = gris;
-            chkInicio.ForeColor = texto; chkActivo.ForeColor = texto;
+            chkActivo.ForeColor = texto;
             foreach (Button b in botones)
             {
                 bool pest = false, sel = false;
@@ -709,10 +746,7 @@ namespace Xuca
             if (fv != null)
             {
                 fv.Text = Nombre + " v" + Version;
-                chkInicio.Text = T("Iniciar con Windows", "Start with Windows");
-                bEsc.Text = T("Acceso directo en el escritorio", "Desktop shortcut");
-                bTema.Text = TextoTema();
-                bIdioma.Text = T("English", "Español");
+                bAj.Text = T("Ajustes", "Settings");
                 bOver.Text = T("Overlay de rendimiento", "Performance overlay");
                 bNov.Text = T("Novedades", "What's new");
                 bKofi.Text = T("♥ Apoyar en Ko-fi", "♥ Support on Ko-fi");
@@ -828,48 +862,9 @@ namespace Xuca
             arriba.Height = (int)(44 * k);
             arriba.Padding = new Padding((int)(10 * k), (int)(9 * k), (int)(10 * k), 0);
 
-            chkInicio = new CheckBox();
-            chkInicio.AutoSize = true;
-            chkInicio.Margin = new Padding(0, 5, 14, 0);
-            chkInicio.Checked = TareaExiste();
-            chkInicio.CheckedChanged += delegate
-            {
-                bool quiere = chkInicio.Checked;
-                if (quiere) { try { TareaCrear(); } catch { } }
-                else { try { TareaBorrar(); } catch { } }
-                if (quiere != TareaExiste())
-                {
-                    if (quiere) MessageBox.Show(T("No se pudo activar el inicio con Windows:\n", "Could not enable start with Windows:\n") + UltimoError, Nombre);
-                    chkInicio.Checked = !quiere;
-                }
-            };
-            arriba.Controls.Add(chkInicio);
-
-            bEsc = Boton(arriba, delegate
-            {
-                try
-                {
-                    Acceso(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Nombre + ".lnk"), "");
-                    bEsc.Text = T("Listo, ya está en el escritorio", "Done, it is on your desktop");
-                }
-                catch { bEsc.Text = T("No se pudo crear", "Could not create it"); }
-            });
-            // Tema: Sistema -> Claro -> Oscuro -> Sistema
-            bTema = Boton(arriba, delegate
-            {
-                tema = tema == "sistema" ? "claro" : (tema == "claro" ? "oscuro" : "sistema");
-                GuardarAjuste("tema", tema);
-                bTema.Text = TextoTema();
-                AplicarTema();
-            });
-            // El boton muestra el otro idioma
-            bIdioma = Boton(arriba, delegate
-            {
-                Modulo.Idioma = Modulo.Idioma == "en" ? "es" : "en";
-                GuardarAjuste("idioma", Modulo.Idioma);
-                ActualizarTextos();
-            });
-
+            // Ajustes: idioma, tema, inicio con Windows y copia del estilo del overlay (el menu se arma al abrirlo, asi siempre muestra lo que esta elegido)
+            menuAj = new ContextMenuStrip();
+            bAj = Boton(arriba, delegate { ArmarMenuAjustes(); menuAj.Show(bAj, new Point(0, bAj.Height)); });
             bOver = Boton(arriba, delegate
             {
                 if (Win10) OvAjustes.Mostrar();
@@ -879,7 +874,7 @@ namespace Xuca
             // Novedades: la ultima version del changelog (embebido) en el idioma de la app; el resto, en GitHub
             bNov = Boton(arriba, delegate { Novedades.Mostrar(oscuroAhora, icono); });
 
-            // Ko-fi: celeste fijo, igual que en el Xuca OPtimizer (no cambia con el tema)
+            // Ko-fi: celeste fijo, igual que en Brio (no cambia con el tema)
             bKofi = Boton(arriba, delegate { try { Process.Start("https://ko-fi.com/011xuca"); } catch { } });
             botones.Remove(bKofi);
             bKofi.BackColor = Color.FromArgb(143, 211, 244);
@@ -973,7 +968,7 @@ namespace Xuca
             Form f = fv;
             if (f == null) return;
             timerTema.Stop();
-            fv = null; tb = null; estado = null; panelExtra = null; panelExtraDe = null; chkInicio = null; chkActivo = null; botones.Clear(); pestanas.Clear();
+            fv = null; tb = null; estado = null; panelExtra = null; panelExtraDe = null; chkActivo = null; botones.Clear(); pestanas.Clear();
             f.Hide();
             Ui.BeginInvoke((MethodInvoker)delegate { f.Dispose(); Recortar(); });
         }

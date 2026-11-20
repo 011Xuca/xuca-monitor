@@ -453,7 +453,7 @@ namespace Xuca
             foreach (Placa x in placas) if (x.Arriba && x.Vel > 0) L.Add(T("  Velocidad de ", "  Link speed of ") + x.Tipo + " " + x.Nombre + ": " + VelTexto(x.Vel));
             if (sosp.Count > 0) L.Add(T("  Programas abiertos que suelen usar mucho internet: ", "  Open programs that often use a lot of internet: ") + string.Join(", ", sosp.ToArray()));
             L.Add("");
-            L.Add(T("OPCIONES DE RED DEL XUCA OPTIMIZER EN ESTA PC:", "XUCA OPTIMIZER NETWORK OPTIONS ON THIS PC:"));
+            L.Add(T("OPCIONES DE RED DE BRIO EN ESTA PC:", "BRIO NETWORK OPTIONS ON THIS PC:"));
             foreach (string o in OpcionesScript()) L.Add("  " + o);
 
             foreach (string x in L) Log(x);
@@ -493,7 +493,7 @@ namespace Xuca
                 {
                     L.Add(T("  La placa de red del cable perdió la conexión (" + n.Nombre + ").", "  The wired network card lost its link (" + n.Nombre + ")."));
                     L.Add(T("  Suele ser el driver, el ahorro de energía de la placa o el cable.", "  It is usually the driver, the card power saving or the cable."));
-                    L.Add(T("  Actualizá el driver de red desde la página de tu placa madre (Buscar drivers del Xuca OPtimizer).", "  Update the network driver from your motherboard page (Find drivers in Xuca OPtimizer)."));
+                    L.Add(T("  Actualizá el driver de red desde la página de tu placa madre (Buscar drivers de Brio).", "  Update the network driver from your motherboard page (Find drivers in Brio)."));
                     L.Add(T("  En placas de 2.5 Gbps (como las Realtek 2.5GbE) probá \"Limitar el cable a 1 Gbps\" y \"Desactivar el ahorro de energía de la red\".", "  On 2.5 Gbps cards (like Realtek 2.5GbE) try \"Limit the cable to 1 Gbps\" and \"Disable network power saving\"."));
                 }
             }
@@ -522,7 +522,7 @@ namespace Xuca
             }
             else L.Add(T("  Ninguno (las placas siguieron conectadas).", "  None (the cards stayed connected)."));
             L.Add("");
-            L.Add(T("OPCIONES DE RED DEL XUCA OPTIMIZER EN ESTA PC:", "XUCA OPTIMIZER NETWORK OPTIONS ON THIS PC:"));
+            L.Add(T("OPCIONES DE RED DE BRIO EN ESTA PC:", "BRIO NETWORK OPTIONS ON THIS PC:"));
             foreach (string o in OpcionesScript()) L.Add("  " + o);
             L.Add("");
             L.Add(T("EVENTOS DE WINDOWS (desde 1 minuto antes):", "WINDOWS EVENTS (from 1 minute before):"));
@@ -549,7 +549,7 @@ namespace Xuca
             Agregar(string.Join("\r\n", L.ToArray()).TrimEnd(), 1);
         }
 
-        // ---------- Opciones de red del Xuca OPtimizer puestas en esta PC (leidas del registro) ----------
+        // ---------- Opciones de red de Brio puestas en esta PC (leidas del registro) ----------
         const string ClaseRed = @"SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}";
         static readonly string[] ClavesEee = { "*EEE", "EEE", "AdvancedEEE", "GreenEthernet", "EnableGreenEthernet", "PowerSavingMode" };
         static readonly Regex Rapida = new Regex(@"(?<![\d.])(2\.5|5|10)\s*Gbps", RegexOptions.IgnoreCase);

@@ -418,6 +418,8 @@ namespace Xuca
             }
             string energia = "";
             if (F.Plan != "") energia = T("Plan de energía: ", "Power plan: ") + F.Plan;
+            string modo = MonitorPC.NombreModo(F.ModoGuid);
+            if (modo != "") energia = Junta(energia, T("Modo de energía: ", "Power mode: ") + modo);
             if (L.Bateria >= 0) energia = Junta(energia, T("Batería ", "Battery ") + L.Bateria + " %" + (L.Enchufada ? T(" (enchufada)", " (plugged in)") : T(" (a batería)", " (on battery)"))
                 + (L.BateriaW.HasValue ? (L.BateriaW.Value < 0 ? T(", consume ", ", drawing ") : T(", carga a ", ", charging at ")) + Wt(Math.Abs(L.BateriaW.Value)) : ""));
             if (energia != "") info.Add(new KeyValuePair<string, Nivel>(energia, F.PlanGuid == MonitorPC.PlanAhorro || (L.Bateria >= 0 && !L.Enchufada) ? Nivel.Amarillo : Nivel.Gris));

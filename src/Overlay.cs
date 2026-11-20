@@ -885,6 +885,33 @@ namespace Xuca
 
         public static OvCfg Config { get { return cfg.Copia(); } }
 
+        // Copia de seguridad del estilo (la lista de juegos no se incluye); se usan desde el menu Ajustes
+        public static void ExportarEstilo(IWin32Window dueno)
+        {
+            using (SaveFileDialog sd = new SaveFileDialog())
+            {
+                sd.Filter = "Pulso overlay (*.txt)|*.txt"; sd.FileName = "estilo-overlay.txt";
+                if (sd.ShowDialog(dueno) == DialogResult.OK) { try { File.WriteAllLines(sd.FileName, cfg.Texto(false)); } catch { } }
+            }
+        }
+
+        public static void ImportarEstilo(IWin32Window dueno)
+        {
+            using (OpenFileDialog od = new OpenFileDialog())
+            {
+                od.Filter = "Pulso overlay (*.txt)|*.txt";
+                if (od.ShowDialog(dueno) != DialogResult.OK) return;
+                try
+                {
+                    OvCfg n = cfg.Copia();
+                    n.Leer(File.ReadAllLines(od.FileName), false);
+                    Aplicar(n, true);
+                    OvAjustes.Recargar();
+                }
+                catch { }
+            }
+        }
+
         public static void Iniciar(string carpeta)
         {
             arch = Path.Combine(carpeta, "overlay.txt");
@@ -1145,6 +1172,14 @@ namespace Xuca
             abierta.Show();
         }
 
+        // Si la ventana esta abierta cuando se importa un estilo desde el menu Ajustes, que muestre lo nuevo
+        public static void Recargar()
+        {
+            if (abierta == null || abierta.IsDisposed) return;
+            abierta.c = OvMgr.Config;
+            abierta.Cargar();
+        }
+
         OvAjustes()
         {
             c = OvMgr.Config;
@@ -1300,30 +1335,6 @@ namespace Xuca
             CheckBox prev = new CheckBox(); prev.Appearance = Appearance.Button; prev.AutoSize = true; prev.Text = T("Vista previa", "Preview");
             prev.CheckedChanged += delegate { OvMgr.Prueba(prev.Checked); };
             fb.Controls.Add(prev);
-            Button bex = new Button(); bex.AutoSize = true; bex.Text = T("Exportar estilo", "Export style");
-            bex.Click += delegate
-            {
-                using (SaveFileDialog sd = new SaveFileDialog())
-                {
-                    sd.Filter = "Pulso overlay (*.txt)|*.txt"; sd.FileName = "estilo-overlay.txt";
-                    if (sd.ShowDialog(this) == DialogResult.OK) { try { File.WriteAllLines(sd.FileName, c.Texto(false)); } catch { } }
-                }
-            };
-            fb.Controls.Add(bex);
-            Button bim = new Button(); bim.AutoSize = true; bim.Text = T("Importar estilo", "Import style");
-            bim.Click += delegate
-            {
-                using (OpenFileDialog od = new OpenFileDialog())
-                {
-                    od.Filter = "Pulso overlay (*.txt)|*.txt";
-                    if (od.ShowDialog(this) == DialogResult.OK)
-                    {
-                        try { c.Leer(File.ReadAllLines(od.FileName), false); Cargar(); Cambio(null, null); } catch { }
-                    }
-                }
-            };
-            fb.Controls.Add(bim);
-
             Cargar();
             FormClosed += delegate { OvMgr.Prueba(false); if (debounce != null) debounce.Dispose(); abierta = null; };
         }

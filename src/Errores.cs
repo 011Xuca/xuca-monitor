@@ -165,7 +165,7 @@ namespace Xuca
                     grupos[clave] = a; orden.Add(clave);
                     Explicar(a, e, appNom);
                 }
-                if (a.Crudo.Count < 4) a.Crudo.Add(Eventos.Hora(e) + "  " + prov + " (" + id + "): " + Eventos.PrimeraLinea(e, 140));
+                if (a.Crudo.Count < 4) a.Crudo.Add(Eventos.Hora(e) + "  " + prov + " (" + id + "): " + Eventos.PrimeraLinea(e, tipo == "pantallazo" ? 400 : 140));
             }
             if (maxRec > 0) App.GuardarAjuste("errores_visto", maxRec.ToString());
 
@@ -298,6 +298,15 @@ namespace Xuca
                 case "19": return new string[] { "BAD_POOL_HEADER", T("Un driver o la RAM.", "A driver or the RAM.") };
                 case "7A": return new string[] { "KERNEL_DATA_INPAGE_ERROR", T("Windows no pudo leer del disco. Revisá la salud del disco y su cable.", "Windows could not read from the drive. Check the drive health and its cable.") };
                 case "F4": return new string[] { "CRITICAL_OBJECT_TERMINATION", T("Se cerró algo vital. Suele ser el disco (cable, SSD con fallas).", "Something vital closed. It is usually the drive (cable, failing SSD).") };
+                case "51": return new string[] { "REGISTRY_ERROR", T("Windows no pudo leer o escribir el registro. Suele ser el disco (SSD con fallas o su cable), la RAM o archivos de Windows dañados.", "Windows could not read or write the registry. Usually the drive (failing SSD or its cable), the RAM or damaged Windows files.") };
+                case "7F": return new string[] { "UNEXPECTED_KERNEL_MODE_TRAP", T("El procesador marcó un error grave. Muy seguido es RAM, overclock o undervolt inestable.", "The CPU flagged a serious error. Very often RAM or an unstable overclock or undervolt.") };
+                case "C5": return new string[] { "DRIVER_CORRUPTED_EXPOOL", T("Un driver dañó la memoria. Actualizá los drivers (red y video primero).", "A driver corrupted memory. Update the drivers (network and video first).") };
+                case "154": return new string[] { "UNEXPECTED_STORE_EXCEPTION", T("Falló el almacenamiento. Suele ser el SSD (driver, cable o salud del disco).", "Storage failed. Usually the SSD (driver, cable or drive health).") };
+                case "117": return new string[] { "VIDEO_TDR_TIMEOUT_DETECTED", T("La placa de video tardó demasiado en responder.", "The graphics card took too long to respond.") };
+                case "141": return new string[] { "VIDEO_ENGINE_TIMEOUT_DETECTED", T("La placa de video dejó de responder. Driver, overclock o fuente.", "The graphics card stopped responding. Driver, overclock or power supply.") };
+                case "1CA": return new string[] { "SYNTHETIC_WATCHDOG_TIMEOUT", T("El sistema se quedó colgado un rato largo. Suele ser un driver o el procesador inestable.", "The system hung for a long time. Usually a driver or an unstable CPU.") };
+                case "A0": return new string[] { "INTERNAL_POWER_ERROR", T("Falló la administración de energía. Probá actualizar BIOS y chipset.", "Power management failed. Try updating the BIOS and chipset.") };
+                case "BE": return new string[] { "ATTEMPTED_WRITE_TO_READONLY_MEMORY", T("Un driver quiso escribir donde no debía.", "A driver tried to write where it should not.") };
             }
             return null;
         }
@@ -312,7 +321,7 @@ namespace Xuca
                     a.Que.Add(T("El driver de la placa de video dejó de responder y Windows lo reinició.", "The graphics card driver stopped responding and Windows restarted it."));
                     a.Que.Add(T("Por eso la pantalla se pone negra unos segundos o el juego se cierra.", "That is why the screen goes black for a few seconds or the game closes."));
                     a.Probar.Add(T("Si tenés overclock o undervolt en la placa de video (MSI Afterburner, etc.), sacalo.", "If you have an overclock or undervolt on the graphics card (MSI Afterburner, etc.), remove it."));
-                    a.Probar.Add(T("Reinstalá el driver de video limpio: DDU y después el driver nuevo (DDU está en Apps recomendadas del Xuca OPtimizer).", "Reinstall the video driver cleanly: DDU and then the new driver (DDU is in Xuca OPtimizer's Recommended apps)."));
+                    a.Probar.Add(T("Reinstalá el driver de video limpio: DDU y después el driver nuevo (DDU está en Apps recomendadas de Brio).", "Reinstall the video driver cleanly: DDU and then the new driver (DDU is in Brio's Recommended apps)."));
                     a.Probar.Add(T("Mirá la temperatura de la placa en la pestaña GPU mientras jugás. Si llega a 90 °C (o el hot spot a 105 °C), limpiá el polvo.", "Check the card temperature in the GPU tab while gaming. If it reaches 90 °C (or the hot spot 105 °C), clean the dust."));
                     a.Probar.Add(T("Si se repite con juegos pesados, puede ser la fuente (poca potencia o vieja).", "If it keeps happening with heavy games, it can be the power supply (too weak or old)."));
                     break;
@@ -323,10 +332,10 @@ namespace Xuca
                     if (m.Success) cod = m.Groups[1].Value.ToUpperInvariant();
                     string[] info = Pantallazo(cod);
                     a.Titulo = T("PANTALLAZO AZUL", "BLUE SCREEN");
-                    a.Que.Add(T("La PC tuvo un pantallazo azul y se reinició", "The PC had a blue screen and restarted") + (cod != "" ? T(" (código ", " (code ") + "0x" + cod + (info != null ? " " + info[0] : "") + ")." : "."));
+                    a.Que.Add(T("La PC tuvo un pantallazo azul y se reinició", "The PC had a blue screen and restarted") + (cod != "" ? T(" (código ", " (code ") + "0x" + cod.PadLeft(8, '0') + (info != null ? " " + info[0] : "") + ")." : "."));
                     if (info != null) a.Que.Add(info[1]);
                     a.Probar.Add(T("Si tenés overclock, undervolt o EXPO/XMP, probá unos días sin eso. Si no vuelve a pasar, era eso.", "If you have overclock, undervolt or EXPO/XMP, try a few days without it. If it does not happen again, that was it."));
-                    a.Probar.Add(T("Actualizá los drivers desde la página de tu placa madre (Buscar drivers del Xuca OPtimizer) y el de video.", "Update the drivers from your motherboard page (Find drivers in Xuca OPtimizer) and the video driver."));
+                    a.Probar.Add(T("Actualizá los drivers desde la página de tu placa madre (Buscar drivers de Brio) y el de video.", "Update the drivers from your motherboard page (Find drivers in Brio) and the video driver."));
                     a.Probar.Add(T("Si se repite, el archivo del pantallazo está en C:\\Windows\\Minidump: se puede abrir con WhoCrashed o BlueScreenView para ver qué driver fue.", "If it keeps happening, the crash file is in C:\\Windows\\Minidump: open it with WhoCrashed or BlueScreenView to see which driver it was."));
                     break;
                 case "apagon":
@@ -351,7 +360,7 @@ namespace Xuca
                 case "disco":
                     a.Titulo = T("ERROR DEL DISCO", "DRIVE ERROR");
                     a.Que.Add(T("Windows tuvo problemas para leer o escribir en un disco. Puede causar tirones, juegos que tardan o archivos dañados.", "Windows had trouble reading or writing a drive. It can cause stutters, slow game loading or damaged files."));
-                    a.Probar.Add(T("Mirá la salud del disco con CrystalDiskInfo (está en Apps recomendadas del Xuca OPtimizer). Si no dice \"Bueno\", hacé una copia de tus archivos.", "Check the drive health with CrystalDiskInfo (in Xuca OPtimizer's Recommended apps). If it does not say \"Good\", back up your files."));
+                    a.Probar.Add(T("Mirá la salud del disco con CrystalDiskInfo (está en Apps recomendadas de Brio). Si no dice \"Bueno\", hacé una copia de tus archivos.", "Check the drive health with CrystalDiskInfo (in Brio's Recommended apps). If it does not say \"Good\", back up your files."));
                     a.Probar.Add(T("Si es un disco SATA, cambiá el cable de datos o el puerto de la placa madre.", "If it is a SATA drive, change the data cable or the motherboard port."));
                     a.Probar.Add(T("Si es un SSD NVMe, actualizá su firmware desde la página de la marca.", "If it is an NVMe SSD, update its firmware from the brand's page."));
                     break;

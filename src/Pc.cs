@@ -98,7 +98,7 @@ namespace Xuca
         public Nivel RamCanalNivel = Nivel.Gris; public string RamCanalTexto = "";
         public string RamMezclaTexto = "";
         public int RamVelModulos;
-        public volatile string Plan = "", PlanGuid = "";
+        public volatile string Plan = "", PlanGuid = "", ModoGuid = "";   // ModoGuid: modo de energia de Windows 11 ("" = no aplica)
         public volatile List<DiscoFisico> Fisicos = new List<DiscoFisico>();   // se relee cada 2 min (la salud SMART puede cambiar)
     }
 
@@ -250,7 +250,7 @@ namespace Xuca
                     }
                     if (DateTime.Now >= proximoPlan)
                     {
-                        LeerPlan(f); LeerFisicos(f); smart = SmartAta.Leer(f.Fisicos); proximoPlan = DateTime.Now.AddMinutes(2);
+                        LeerFisicos(f); smart = SmartAta.Leer(f.Fisicos); proximoPlan = DateTime.Now.AddMinutes(2);
                         // El usuario instalo (o actualizo) PawnIO por su cuenta: se reabren los sensores para que la libreria lo use
                         Version antes = PawnVersion; LeerPawn();
                         if (PawnOk && PawnVersion != antes) { reabrir = true; LogGeneral(T("PawnIO detectado (v", "PawnIO detected (v") + PawnVersion + ")"); }
@@ -289,6 +289,7 @@ namespace Xuca
                         }
                     }
                     Propias(L, f);
+                    try { VigilarPlan(f, L.Juego); } catch { }
                     Ultima = L;
                     Anotar(L, ++n % 5 == 0);
                     try { Evaluar(L, f); }
@@ -636,7 +637,73 @@ namespace Xuca
         }
 
         // Plan de energia activo (en "Ahorro de energia" el procesador va mas lento)
-        public const string PlanAhorro = "a1841308-3541-4fab-bc81-f71556f20b4a";
+        public const string PlanAhorro = "a1841308-3541-4fab-bc81-f71556f20b4a", PlanEquilibrado = "381b4222-f694-41f0-9685-ff5bb260df2e";
+        [DllImport("powrprof.dll")] static extern uint PowerGetActiveScheme(IntPtr root, out IntPtr guid);
+        [DllImport("powrprof.dll")] static extern uint PowerReadFriendlyName(IntPtr root, ref Guid scheme, IntPtr sub, IntPtr setting, IntPtr buf, ref uint size);
+        [DllImport("powrprof.dll")] static extern uint PowerGetEffectiveOverlayScheme(out Guid g);
+        [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr h);
+        DateTime proximoPlanPcfg = DateTime.MinValue;
+
+        // Windows, un juego o un programa pueden cambiar el plan (y el modo de energia de Windows 11) sin avisar: se mira en cada
+        // vuelta con la API (leer el registro, menos de 1 ms) y, si cambio con Pulso abierto, queda una nota en CPU que no suma al contador.
+        void VigilarPlan(InfoFija f, string juego)
+        {
+            string gAntes = f.PlanGuid, nAntes = f.Plan, mAntes = f.ModoGuid;
+            string[] p = PlanApi();
+            if (p != null) { if (p[0] != gAntes) { f.PlanGuid = p[0]; f.Plan = p[1] != "" ? p[1] : p[0]; } }
+            else if (DateTime.Now >= proximoPlanPcfg) { proximoPlanPcfg = DateTime.Now.AddMinutes(2); LeerPlan(f); }   // sin la API: powercfg cada 2 min, como antes
+            f.ModoGuid = f.PlanGuid == PlanEquilibrado ? ModoApi() : "";
+            if (gAntes == "") return;   // primera lectura
+            List<string> que = new List<string>();
+            if (f.PlanGuid != gAntes) que.Add(T("El plan de energía cambió de \"" + nAntes + "\" a \"" + f.Plan + "\".", "The power plan changed from \"" + nAntes + "\" to \"" + f.Plan + "\"."));
+            else if (f.ModoGuid != mAntes && NombreModo(f.ModoGuid) != "" && NombreModo(mAntes) != "") que.Add(T("El modo de energía de Windows cambió de \"" + NombreModo(mAntes) + "\" a \"" + NombreModo(f.ModoGuid) + "\".", "The Windows power mode changed from \"" + NombreModo(mAntes) + "\" to \"" + NombreModo(f.ModoGuid) + "\"."));
+            if (que.Count == 0) return;
+            if (juego != "") que.Add(T("Pasó mientras corría " + juego + ".", "It happened while " + juego + " was running."));
+            que.Add(T("Lo pueden cambiar Windows, un juego o un programa de la placa o de la notebook.", "Windows, a game or a motherboard or laptop utility can change it."));
+            Aviso(CAT_CPU, T("CPU: CAMBIÓ LA ENERGÍA", "CPU: POWER SETTING CHANGED"), que, null, "", 0);
+        }
+
+        // GUID del plan activo y su nombre (el mismo que muestra Windows), o null si la API no esta
+        static string[] PlanApi()
+        {
+            try
+            {
+                IntPtr p;
+                if (PowerGetActiveScheme(IntPtr.Zero, out p) != 0) return null;
+                Guid g;
+                try { g = (Guid)Marshal.PtrToStructure(p, typeof(Guid)); } finally { LocalFree(p); }
+                string nom = "";
+                uint n = 0;
+                PowerReadFriendlyName(IntPtr.Zero, ref g, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, ref n);
+                if (n > 0 && n < 4096)
+                {
+                    IntPtr b = Marshal.AllocHGlobal((int)n);
+                    try { if (PowerReadFriendlyName(IntPtr.Zero, ref g, IntPtr.Zero, IntPtr.Zero, b, ref n) == 0) nom = Marshal.PtrToStringUni(b) ?? ""; }
+                    finally { Marshal.FreeHGlobal(b); }
+                }
+                return new string[] { g.ToString(), nom.Trim() };
+            }
+            catch { return null; }
+        }
+
+        // Modo de energia de Windows 11 (Configuracion > Sistema > Energia), solo existe con el plan Equilibrado. Windows 10 viejo no tiene la funcion.
+        static string ModoApi()
+        {
+            try { Guid g; return PowerGetEffectiveOverlayScheme(out g) == 0 ? g.ToString() : ""; }
+            catch { return ""; }
+        }
+
+        public static string NombreModo(string g)
+        {
+            switch (g)
+            {
+                case "961cc777-2547-4f9d-8174-7d86181b8a7a": return T("Mejor eficiencia energética", "Best power efficiency");
+                case "00000000-0000-0000-0000-000000000000": return T("Equilibrado", "Balanced");
+                case "ded574b5-45a0-4f42-8737-46345c09c238": return T("Mejor rendimiento", "Best performance");
+                default: return "";
+            }
+        }
+
         void LeerPlan(InfoFija f)
         {
             try
