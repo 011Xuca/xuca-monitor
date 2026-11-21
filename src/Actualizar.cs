@@ -166,6 +166,15 @@ namespace Xuca
             });
         }
 
+        // Cierra y vuelve a abrir esta misma copia (con o sin ventana, como estaba). Lo usa la deteccion de PawnIO.
+        public void Reiniciar()
+        {
+            bool conVentana = fv != null;
+            string exe = Exe;
+            Salir();
+            try { Process.Start(exe, "/actualizado" + (conVentana ? "" : " /inicio")); } catch { }
+        }
+
         // Esta copia se cierra sola despues del reemplazo, pero puede haber otras del mismo .exe (otra sesion de Windows,
         // o una version anterior que quedo colgada al cerrarse): si siguen vivas el .viejo no se puede borrar y la
         // actualizacion falla. Se cierran de golpe (no se les puede pedir que salgan desde otra sesion).

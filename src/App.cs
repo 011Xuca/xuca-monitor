@@ -180,6 +180,70 @@ namespace Xuca
         internal override string Texto() { return Pulso.SoloWin10(queEs, queEn); }
     }
 
+    // Menu de Ajustes con la misma cara que la ventana: fondo de tarjeta, borde fino, seleccion verde suave con esquinas
+    // redondeadas y la tilde en verde (sin el cuadrito con borde que dibuja Windows)
+    class MenuAjustes : ToolStripProfessionalRenderer
+    {
+        readonly Color bg, linea, encima, acento, texto;
+        public MenuAjustes(bool oscuro) : base(new ProfessionalColorTable())
+        {
+            bg = oscuro ? Color.FromArgb(28, 32, 39) : Color.White;
+            linea = oscuro ? Color.FromArgb(46, 52, 64) : Color.FromArgb(209, 213, 219);
+            encima = oscuro ? Color.FromArgb(32, 46, 40) : Color.FromArgb(236, 247, 240);
+            acento = oscuro ? Color.FromArgb(74, 222, 128) : Color.FromArgb(21, 128, 61);
+            texto = oscuro ? Color.White : Color.FromArgb(17, 24, 39);
+            RoundedEdges = false;
+        }
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+        {
+            using (SolidBrush b = new SolidBrush(bg)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+        }
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            using (Pen p = new Pen(linea)) e.Graphics.DrawRectangle(p, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+        }
+        protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) { }
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Enabled || !(e.Item.Selected || e.Item.Pressed)) return;
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            Rectangle r = new Rectangle(4, 1, e.Item.Width - 9, e.Item.Height - 3);
+            using (System.Drawing.Drawing2D.GraphicsPath gp = new System.Drawing.Drawing2D.GraphicsPath())
+            using (SolidBrush b = new SolidBrush(encima))
+            {
+                int d = 8;
+                gp.AddArc(r.X, r.Y, d, d, 180, 90); gp.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                gp.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); gp.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+                gp.CloseFigure();
+                e.Graphics.FillPath(b, gp);
+            }
+        }
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            Rectangle r = e.ImageRectangle;
+            int cx = r.X + r.Width / 2, cy = e.Item.Height / 2;
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (Pen p = new Pen(acento, 2f))
+            {
+                p.StartCap = System.Drawing.Drawing2D.LineCap.Round; p.EndCap = System.Drawing.Drawing2D.LineCap.Round; p.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+                e.Graphics.DrawLines(p, new Point[] { new Point(cx - 4, cy), new Point(cx - 1, cy + 3), new Point(cx + 4, cy - 3) });
+            }
+        }
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            using (Pen p = new Pen(linea)) e.Graphics.DrawLine(p, 8, e.Item.Height / 2, e.Item.Width - 8, e.Item.Height / 2);
+        }
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e) { e.ArrowColor = texto; base.OnRenderArrow(e); }
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = e.Item.Enabled ? texto : Color.Gray;
+            // El relleno vertical del item no mueve el texto (queda pegado arriba): se centra a mano
+            Rectangle r = e.TextRectangle;
+            e.TextRectangle = new Rectangle(r.X, (e.Item.Height - r.Height) / 2, r.Width, r.Height);
+            base.OnRenderItemText(e);
+        }
+    }
+
     // ---------- La app ----------
     public partial class Pulso : ApplicationContext
     {
@@ -677,11 +741,15 @@ namespace Xuca
             Color bg = oscuroAhora ? Color.FromArgb(28, 32, 39) : Color.White;
             Color fg = oscuroAhora ? Color.White : Color.FromArgb(17, 24, 39);
             menuAj.BackColor = bg; menuAj.ForeColor = fg;
+            MenuAjustes dibujo = new MenuAjustes(oscuroAhora);
+            menuAj.Renderer = dibujo; menuAj.ShowImageMargin = false; menuAj.ShowCheckMargin = true;
             foreach (ToolStripMenuItem m in menuAj.Items)
             {
-                m.BackColor = bg; m.ForeColor = fg;
-                m.DropDown.BackColor = bg;
-                foreach (ToolStripItem d in m.DropDownItems) { d.BackColor = bg; d.ForeColor = fg; }
+                m.BackColor = bg; m.ForeColor = fg; m.Padding = new Padding(4, 5, 4, 5);
+                ToolStripDropDownMenu dd = m.DropDown as ToolStripDropDownMenu;
+                m.DropDown.BackColor = bg; m.DropDown.Renderer = dibujo;
+                if (dd != null) { dd.ShowImageMargin = false; dd.ShowCheckMargin = true; }
+                foreach (ToolStripItem d in m.DropDownItems) { d.BackColor = bg; d.ForeColor = fg; d.Padding = new Padding(4, 5, 4, 5); }
             }
         }
 

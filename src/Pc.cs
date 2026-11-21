@@ -253,7 +253,13 @@ namespace Xuca
                         LeerFisicos(f); smart = SmartAta.Leer(f.Fisicos); proximoPlan = DateTime.Now.AddMinutes(2);
                         // El usuario instalo (o actualizo) PawnIO por su cuenta: se reabren los sensores para que la libreria lo use
                         Version antes = PawnVersion; LeerPawn();
-                        if (PawnOk && PawnVersion != antes) { reabrir = true; LogGeneral(T("PawnIO detectado (v", "PawnIO detected (v") + PawnVersion + ")"); }
+                        if (PawnOk && PawnVersion != antes)
+                        {
+                            LogGeneral(T("PawnIO detectado (v", "PawnIO detected (v") + PawnVersion + "): reiniciando Pulso");
+                            // Reabrir solo los sensores no alcanza: la libreria no toma el driver hasta que el proceso arranca de nuevo
+                            EnUi(delegate { App.Reiniciar(); });
+                            return;
+                        }
                     }
 
                     Lectura L = new Lectura();
